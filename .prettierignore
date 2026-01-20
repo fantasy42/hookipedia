@@ -1,0 +1,13 @@
+node_modules
+next-env.d.ts
+package-lock.json
+.next
+.source
+.git
+/out
+/build
+*.log*
+*.tsbuildinfo
+*.md*
+*.json
+bun.lock

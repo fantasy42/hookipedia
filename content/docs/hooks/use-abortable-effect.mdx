@@ -1,0 +1,248 @@
+---
+title: useAbortableEffect
+description: A React hook that provides automatic cleanup for asynchronous effects using AbortController.
+---
+
+## Introduction
+
+Modern web development is increasingly asynchronous. Whether we are fetching data, utilizing the `Streams API`, or setting up event listeners, managing the lifecycle of these operations is critical. The `useAbortableEffect` hook simplifies this by injecting an **AbortSignal** directly into your effect.
+
+This eliminates the "isMounted" anti-pattern and provides a clean, native way to cancel ongoing network requests or asynchronous logic when a component unmounts or dependencies change.
+
+## Basic Usage
+
+```tsx
+import { useAbortableEffect } from '@/hooks/useAbortableEffect';
+
+function UserProfile({ userId }) {
+  useAbortableEffect((signal) => {
+    fetch(`/api/user/${userId}`, { signal })
+      .then(res => res.json())
+      .then(data => console.log(data))
+      .catch(err => {
+        if (err.name === 'AbortError') return; // Silent handling of cancellations
+      });
+  }, [userId]);
+
+  return <div>Check console for profile data</div>;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    callback: {
+      type: '(signal: AbortSignal) => Destructor',
+      description: 'The effect function that receives an AbortSignal as its first argument. Can return a cleanup function.',
+      required: true,
+    },
+    deps: {
+      type: 'DependencyList',
+      description: `Array of dependencies that trigger re-execution when changed, same as React's useEffect.`,
+      required: true,
+    },
+  }}
+/>
+
+### Returns
+
+`void`
+
+This hook doesn't return any value; it's used solely for managing side effects.
+
+## Hook
+
+
+```ts title='useAbortableEffect.ts'
+import type {EffectCallback, DependencyList} from 'react';
+
+import {useEffect} from 'react';
+
+/**
+ * An enhanced useEffect that manages an AbortController internally.
+ * Automatically aborts the signal on unmount or dependency change.
+ *
+ * @example
+ * ```tsx
+ * useAbortableEffect((signal) => {
+ * fetch('/api/data', { signal }).then(processData);
+ * }, [id]);
+ * ```
+ *
+ * @param callback - Effect logic that accepts an AbortSignal.
+ * @param dependencies - Dependency array.
+ */
+export function useAbortableEffect(
+  callback: (signal: AbortSignal) => ReturnType<EffectCallback>,
+  dependencies: DependencyList
+) {
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
+    // Invoke the effect callback and capture the optional cleanup function
+    const cleanup = callback(signal);
+
+    return () => {
+      // 1. Notify listeners (e.g., fetch, event listeners) to cancel work
+      controller.abort();
+      // 2. Execute any user-defined cleanup logic
+      cleanup?.();
+    };
+  }, dependencies);
+}
+```
+
+## Advanced Examples
+
+### Polling with Automatic Cleanup
+
+Polling APIs for real-time updates is common, but without proper cleanup, you can end up with multiple polling intervals running simultaneously. This example shows how `useAbortableEffect` elegantly solves this.
+
+```tsx
+function StockTicker({ symbol, interval = 5000 }) {
+  const [price, setPrice] = useState(null);
+
+  useAbortableEffect(async (signal) => {
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/stocks/${symbol}`,
+          { signal }
+        );
+        const data = await response.json();
+
+        if (!signal.aborted) {
+          setPrice(data.price);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('Polling failed:', error);
+        }
+      }
+    };
+
+    // Initial fetch
+    await poll();
+
+    // Set up interval
+    const intervalId = setInterval(poll, interval);
+
+    // Cleanup function
+    return () => clearInterval(intervalId);
+  }, [symbol, interval]);
+
+  return <div>Current price: {price ?? 'Loading...'}</div>;
+}
+```
+
+### Combining with Third-Party Libraries
+
+Many third-party libraries accept AbortSignals for cancellation. Here's how to integrate Axios with `useAbortableEffect`.
+
+
+```tsx
+import axios from 'axios';
+
+function SearchResults({ query }) {
+  const [results, setResults] = useState([]);
+
+  useAbortableEffect(async (signal) => {
+    if (!query.trim()) return;
+
+    try {
+      const response = await axios.get('/api/search', {
+        params: { q: query },
+        signal // Axios automatically handles cancellation
+      });
+
+      if (!signal.aborted) {
+        setResults(response.data);
+      }
+    } catch (error) {
+      if (!axios.isCancel(error)) {
+        console.error('Search failed:', error);
+      }
+    }
+  }, [query]);
+
+  return <ul>{results.map(result => <li key={result.id}>{result.name}</li>)}</ul>;
+}
+```
+
+
+## Why use this?
+
+### Architectural Benefits
+
+<Callout type="info" title="Beyond Basic useEffect">
+  While you could implement this pattern manually each time, `useAbortableEffect` provides three key advantages: consistency, reliability, and reduced boilerplate.
+</Callout>
+
+<Steps>
+  <Step>
+    <h4>Prevents Common Race Conditions</h4>
+
+    When components unmount during async operations, traditional approaches often set state on unmounted components, causing React warnings and memory leaks. By passing the `AbortSignal` to your async operations, you create a communication channel that allows operations to be cancelled mid-flight.
+  </Step>
+  <Step>
+    <h4>Clean, Predictable Cleanup Flow</h4>
+
+    The hook's cleanup sequence is carefully ordered: first abort the controller (which propagates to all signal-aware operations), then run the user's cleanup function. This ensures that any additional cleanup logic runs <em>after</em> async operations have been properly cancelled.
+  </Step>
+  <Step>
+    <h4>Type-Safe by Design</h4>
+
+    The TypeScript implementation preserves React's original `useEffect` types while adding the `AbortSignal` parameter. This maintains full IDE support and type checking while extending functionality.
+  </Step>
+</Steps>
+
+### Performance Optimizations
+
+<Callout type="warning" title="Memory Management">
+  Every `AbortController` instance must be properly cleaned up to prevent memory leaks. This hook guarantees cleanup even if the user forgets to return a cleanup function.
+</Callout>
+
+The hook creates a new AbortController on every dependency change, but this is intentional:
+
+- **Fresh signals**: Each effect run gets a new, un-aborted signal
+- **Proper cleanup**: Previous controllers are aborted immediately when dependencies change
+- **No stale signals**: Prevents the "zombie promise" problem where old async operations complete with outdated data
+
+## Error Handling
+
+### Handling AbortErrors Correctly
+
+<Callout type="warning" title="Important Distinction">
+  Not all errors from aborted operations should be treated as failures. `AbortError` is a normal part of the cancellation flow.
+</Callout>
+
+```ts
+useAbortableEffect(async (signal) => {
+  try {
+    const response = await fetch('/api/data', { signal });
+    const data = await response.json();
+    // Update state only if not aborted
+    if (!signal.aborted) {
+      setData(data);
+    }
+  } catch (error) {
+    // Check for AbortError specifically
+    if (error.name === 'AbortError') {
+      // This is normal cancellation, not an error
+      console.log('Request was cancelled');
+    } else {
+      // This is an actual error that needs handling
+      setError(error.message);
+    }
+  }
+}, [deps]);
+```
+
+
+### Server-Side Rendering Considerations
+
+The `AbortController` API is only available in browser environments. When using this hook with Next.js or other SSR frameworks, ensure it's only called client-side or wrap it in a check: `if (typeof window !== 'undefined')`.

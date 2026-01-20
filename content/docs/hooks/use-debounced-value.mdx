@@ -1,0 +1,246 @@
+---
+title: useDebouncedValue
+description: A React hook for debouncing controlled values. It synchronizes with an existing state to delay downstream effects like API calls, ensuring a fluid UI while optimizing resource usage.
+---
+
+## Introduction
+
+The `useDebouncedValue` hook takes a frequently changing value (like an input state) and returns a "lazy" version of that value that only updates after a specified delay. This is essential for **controlled components** where you need the UI to reflect user input immediately, but want to delay expensive operations—like network requests—until the user has finished typing.
+
+## Basic Usage
+
+```tsx
+import { useState } from 'react';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+
+function SearchComponent() {
+  const [input, setInput] = useState('');
+  const debouncedSearch = useDebouncedValue(input, 300);
+
+  // Use 'input' for the <input /> value, but 'debouncedSearch' for the API call
+  return <input value={input} onChange={(e) => setInput(e.target.value)} />;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    value: {
+      type: 'T',
+      description: 'The controlled value to be debounced (must not be a function).',
+      required: true,
+    },
+    delay: {
+      type: 'number',
+      description: 'Delay in milliseconds before the output value updates.',
+      required: true,
+    },
+    leading: {
+      type: 'boolean',
+      description: 'If true, updates the output value immediately on the first change.',
+      default: 'false',
+    },
+  }}
+/>
+
+### Returns
+
+`T`: The current debounced version of the input `value`.
+
+## Hook
+
+```ts title='useDebouncedValue.ts'
+import { useState, useRef, useEffect } from 'react';
+
+/**
+ * Ensures that the type T is not a function.
+ */
+type NotFunction<T> = T extends Function ? never : T;
+
+/**
+ * A hook that returns a debounced version of a provided value.
+ * Ideal for **controlled components** where you need immediate UI feedback
+ * but want to delay downstream side effects like API calls.
+ *
+ * @example
+ * ```tsx
+ * const [input, setInput] = useState('');
+ * const debouncedSearch = useDebouncedValue(input, 300);
+ *
+ * return <input value={input} onChange={(e) => setInput(e.target.value)} />;
+ * ```
+ *
+ * @param value - The controlled value to debounce.
+ * @param delay - Delay in milliseconds before the returned value updates.
+ * @param leading - If true, updates the value immediately on the first change.
+ * @returns The current debounced version of the input value.
+ */
+export function useDebouncedValue<T>(
+  value: NotFunction<T>,
+  delay: number,
+  leading: boolean = false
+): T {
+  if (typeof value === 'function') {
+    throw new TypeError('useDebouncedValue does not support functions as values');
+  }
+
+  const [outputValue, setOutputValue] = useState<T>(value);
+  const isLeadingExecution = useRef<boolean>(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (leading && isLeadingExecution.current) {
+      isLeadingExecution.current = false;
+      setOutputValue(value);
+    } else {
+      timeoutId = setTimeout(() => {
+        // Verify signal hasn't been aborted during the wait duration
+        if (!signal.aborted) {
+          isLeadingExecution.current = true;
+          setOutputValue(value);
+        }
+      }, delay);
+    }
+
+    return () => {
+      // Cancel the pending update if the value changes or component unmounts
+      controller.abort();
+
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [value, leading, delay]);
+
+  return outputValue;
+}
+```
+
+## Advanced Examples
+
+### Search with SWR and useDeferredValue
+
+This example demonstrates combining `useDebouncedValue` with `useSWR` for data fetching and `useDeferredValue` for concurrent rendering optimization. The debounce reduces network requests while `useDeferredValue` ensures the UI remains responsive during expensive rendering.
+
+
+```tsx
+import { useState, useDeferredValue } from 'react';
+import useSWR from 'swr';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+
+const ControlledSearch = () => {
+  const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 300);
+
+  // SWR fetches only when debouncedQuery changes (after 300ms delay)
+  const { data } = useSWR<string[]>(
+    debouncedQuery ? `/api/search?q=${debouncedQuery}` : null
+  );
+
+  // Opt into concurrent rendering for expensive UI updates
+  const deferredResults = useDeferredValue(data);
+
+  return (
+    <div className="search-container">
+      <input
+        type="search"
+        placeholder="Search products..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="search-input"
+      />
+
+      <SearchResults results={deferredResults} />
+    </div>
+  );
+};
+
+// Memoize to prevent unnecessary re-renders
+const SearchResults = React.memo(({ results }: { results: string[] | undefined }) => {
+  if (!results) return null;
+
+  // Expensive rendering operation
+  return (
+    <div className="results-grid">
+      {results.map((result) => (
+        <div key={result} className="result-item">
+          {result}
+        </div>
+      ))}
+    </div>
+  );
+});
+```
+
+## Differences with useDebouncedState
+
+Choosing the right hook depends on how you manage your component's state.
+
+| Feature | `useDebouncedValue` | `useDebouncedState` |
+| :--- | :--- | :--- |
+| **Component Type** | **Controlled** components. | **Uncontrolled** components. |
+| **State Source** | You already have a `useState` value. | The hook manages the value for you. |
+| **UI Updates** | UI updates immediately (controlled). | UI updates after delay (if controlled). |
+| **Best For** | When you need the current value *and* the debounced value simultaneously. | When you only care about the debounced value to save re-renders. |
+
+## Why use this?
+
+### Designed for Controlled Components
+
+<Callout type="info" title="Controlled Component Pattern">
+  This hook is specifically designed to work with React's controlled component pattern using `value` and `onChange`. This makes it ideal for form inputs where you need complete control over the input state and validation.
+</Callout>
+
+Unlike `useDebouncedState`, which manages its own state internally, `useDebouncedValue` works with existing React state, providing:
+
+<Steps>
+  <Step>
+    <h4>State Ownership Preservation</h4>
+
+    Your component maintains full control over the state value. The hook only creates a debounced derivative of it, making it easier to integrate with form libraries, validation, and other state management systems.
+  </Step>
+  <Step>
+    <h4>No Setter Function Required</h4>
+
+    Since you're already managing the state with `useState`, you don't need to learn a new setter API. The debounced value updates automatically when the source value changes.
+  </Step>
+</Steps>
+
+### Performance Optimizations
+
+<Callout type="warning" title="AbortController for Cleanup">
+  The hook uses `AbortController` for cleanup, which is more reliable than just clearing timeouts. This ensures that if a component unmounts during the debounce delay, the state update is safely cancelled.
+</Callout>
+
+Key performance decisions:
+
+1. **AbortSignal Integration**: Uses `AbortController` to cancel pending updates on unmount
+2. **Function Value Protection**: Type-level protection against function values that can't be debounced meaningfully
+3. **Leading Edge Support**: Optional immediate updates for better UX in certain scenarios
+
+## Error Handling
+
+<Callout type="error" title="Function Values Not Supported">
+  This hook does not support function values. If you attempt to pass a function, it will throw a `TypeError` during render.
+</Callout>
+
+### Server-Side Rendering Considerations
+
+The hook is client-side only. For SSR frameworks like Next.js:
+
+```tsx
+'use client'; // Required for Next.js App Router
+
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+// ... rest of component
+```
+
+<Callout type="info" title="SSR Compatibility">
+  The hook safely initializes with the provided `value` on both server and client, but debouncing only occurs on the client side.
+</Callout>

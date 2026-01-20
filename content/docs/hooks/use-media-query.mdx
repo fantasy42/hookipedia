@@ -1,0 +1,232 @@
+---
+title: useMediaQuery
+description: A React hook that provides reactive, SSR-safe media query detection with global listener optimization, built on the useSyncExternalStore API for optimal performance.
+---
+
+## Introduction
+
+The `useMediaQuery` hook provides a reactive way to test and respond to CSS media queries in React components. It solves the pain point of manually managing media query listeners and ensuring consistent behavior between server and client rendering.
+
+## Basic Usage
+
+```tsx
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+
+function ResponsiveComponent() {
+  const isMobile = useMediaQuery('(max-width: 768px)',
+  // server default value for SSR
+  false);
+
+  return (
+    <div className={isMobile ? 'mobile' : 'desktop'}>
+      <h1>Current View: {isMobile ? 'Mobile' : 'Desktop'}</h1>
+    </div>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    mediaQuery: {
+      type: 'string',
+      description: 'A valid CSS media query string (e.g., "(max-width: 600px)`)',
+      required: true,
+    },
+    serverValue: {
+      type: 'boolean',
+      description: 'Value to return during SSR. Prevents hydration mismatches.',
+    },
+  }}
+/>
+
+### Returns
+
+`boolean`
+
+The current state of the media query (`true` if the query matches, `false` otherwise).
+
+## Hook
+
+```ts title='useMediaQuery.ts'
+'use client';
+
+import {useCallback, useSyncExternalStore} from 'react';
+
+const externalStore = new Map<string, boolean>();
+
+/**
+ * Subscribes to a media query and notifies the store on change.
+ */
+function subscribeToMediaQuery(mediaQuery: string, callback: () => void) {
+  if (typeof window === 'undefined') {
+    return () => {}; // NOOP for server-side
+  }
+
+  const mediaQueryList = window.matchMedia(mediaQuery);
+
+  const handleChange = () => {
+    // Update the store with the latest value of the media query
+    externalStore.set(mediaQuery, mediaQueryList.matches);
+    callback();
+  };
+
+  mediaQueryList.addEventListener('change', handleChange);
+
+  return () => {
+    mediaQueryList.removeEventListener('change', handleChange);
+  };
+}
+
+/**
+ * A hook that tracks the state of a CSS media query.
+ * Uses useSyncExternalStore to ensure consistency across the application and avoid hydration mismatches.
+ *
+ * @example
+ * ```tsx
+ * const isMobile = useMediaQuery('(max-width: 768px)', false);
+ * ```
+ *
+ * @param mediaQuery - The CSS media query string to monitor.
+ * @param serverValue - The default value to use during SSR to prevent hydration mismatch.
+ * @returns A boolean indicating if the media query matches.
+ */
+export function useMediaQuery(mediaQuery: string, serverValue?: boolean): boolean {
+  if (typeof window !== 'undefined' && !externalStore.has(mediaQuery)) {
+    // This part runs once per media query on the client-side.
+    // We populate the initial value directly from the DOM.
+    externalStore.set(mediaQuery, window.matchMedia(mediaQuery).matches);
+  }
+
+  const subscribe = useCallback(
+    (callback: () => void) => subscribeToMediaQuery(mediaQuery, callback),
+    [mediaQuery]
+  );
+
+  const getSnapshot = () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return externalStore.get(mediaQuery) ?? window.matchMedia(mediaQuery).matches;
+  };
+
+  const getServerSnapshot = () => {
+    if (serverValue !== undefined) {
+      return serverValue;
+    }
+
+    // Explicit error message to help developers identify missing server values
+    throw new Error(
+      `[useMediaQuery] The query "${mediaQuery}" was used on the server without a provided 'serverValue'. ` +
+        `This will cause hydration mismatches.`
+    );
+  };
+
+  // Sync with the external store and handle hydration via getServerSnapshot
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+```
+
+## Advanced Examples
+
+### Conditional Data Fetching
+
+This example demonstrates how to use the `useMediaQuery` hook to dynamically adjust the `pageSize` variable based on the user's device. This allows the `useQuery` hook to perform **responsive data fetching**, requesting fewer items on mobile to optimize performance and bandwidth.
+
+```tsx
+function ProductGrid() {
+  // Fetch fewer items on mobile devices
+  const isMobile = useMediaQuery('(max-width: 768px)', false);
+  const pageSize = isMobile ? 10 : 25;
+
+  const { data } = useQuery({
+    queryKey: ['products', pageSize],
+    queryFn: () => fetchProducts({ limit: pageSize }),
+  });
+
+  // Render product grid...
+}
+```
+
+### System Theme Integration
+
+This example demonstrates how to use `useMediaQuery` to detect the user's system-level dark mode preference. This allows you to dynamically update the application's theme or pass the preference to a styling provider.
+
+```tsx
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+
+function ThemeMonitor() {
+  // Detect if the user's OS is set to dark mode
+  const prefersDark = useMediaQuery('(prefers-color-scheme: dark)', false);
+
+  return (
+    <div className={prefersDark ? 'dark-theme' : 'light-theme'}>
+      <p>
+        Your system is currently in
+        <strong> {prefersDark ? 'Dark' : 'Light'} Mode</strong>.
+      </p>
+
+      {/* Example: Pass to a specialized component */}
+      <CustomChart theme={prefersDark ? 'dark' : 'light'} />
+    </div>
+  );
+}
+```
+
+## Why use this?
+
+### Performance Optimizations
+
+<Callout type="info" title="Behind the Scenes">
+  This hook uses three advanced React patterns: `useSyncExternalStore`, memoization via `useCallback`, and a singleton `Map` for global state management.
+</Callout>
+
+<Steps>
+  <Step>
+    <h4>Global Query Store</h4>
+
+    The `Map` instance acts as a shared cache across all hook instances. Because media query states are global to the browser, this ensures a single source of truth. When multiple components subscribe to the same string, they share a single cache entry, preventing redundant `window.matchMedia()` calls and duplicate event listeners.
+  </Step>
+  <Step>
+    <h4>Optimized Subscription</h4>
+
+    The `subscribe` function is memoized with `useCallback`, ensuring stable reference identity. Cleanup is handled automatically: when the last component unmounts or a query changes, the internal logic removes the browser listener and clears the `Map` entry to prevent memory leaks.
+  </Step>
+  <Step>
+    <h4>Efficient External Store Integration</h4>
+
+    `useSyncExternalStore` handles the subscription to the browser's `MediaQueryList` change events. It ensures React re-renders components only when the actual media query match state changes, optimizing memory efficiency across component instances.
+  </Step>
+</Steps>
+
+
+### Hydration Safety
+
+<Callout type="warning" title="Server-Side Rendering">
+  The hook includes special handling for Next.js/React Server Components and SSR environments.
+</Callout>
+
+The `getServerSnapshot` function provides two safe paths:
+
+1. Explicit server value: You can pass a `serverValue` prop for predictable SSR output.
+2. Hydration error: If no `serverValue` is provided on the server, it throws a clear error to prevent hydration mismatches.
+
+This approach is more reliable than `useEffect`-based solutions that flash incorrect styles during hydration.
+
+## Error Handling
+
+The hook will throw an error during server-side rendering if:
+
+- No `serverValue` is provided
+- The hook is used in a server component without the 'use client' directive
+
+```ts
+// ❌ Will throw on server
+const isMobile = useMediaQuery('(max-width: 768px)');
+
+// ✅ Safe for SSR
+const isMobile = useMediaQuery('(max-width: 768px)', false);
+```

@@ -1,0 +1,407 @@
+---
+title: useControllableState
+description: A React hook that implements the controlled component pattern for any state value, allowing components to seamlessly support both parent-controlled and self-managed state modes without API duplication.
+---
+
+## Introduction
+
+The `useControllableState` hook implements the **controlled component pattern** — a foundational React pattern popularized by form inputs — but generalized for any stateful value. It solves the component API design challenge of creating flexible components that can function in both controlled (parent-managed) and uncontrolled (self-managed) modes without duplicating logic or sacrificing developer experience.
+
+## Basic Usage
+
+```tsx
+import { useControllableState } from '@/hooks/useControllableState';
+
+interface FormInputProps {
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+}
+
+function FormInput({ value, defaultValue, onChange }: FormInputProps) {
+  // This single hook handles both scenarios:
+  // 1. Controlled: When `value` prop is provided
+  // 2. Uncontrolled: When only `defaultValue` is provided
+  const [inputValue, setInputValue] = useControllableState(
+    value,
+    defaultValue || '',
+    onChange
+  );
+
+  return (
+    <input
+      value={inputValue}
+      onChange={(e) => setInputValue(e.target.value)}
+    />
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    value: {
+      type: 'T | undefined',
+      description: 'The controlled value. When provided, the component is controlled by the parent.',
+      required: false,
+    },
+    defaultValue: {
+      type: 'T | undefined',
+      description: 'The initial value for uncontrolled usage. Required if value is undefined.',
+      required: false,
+    },
+    onChange: {
+      type: '(value: C, ...args: A) => void',
+      description: 'Callback fired when the state changes, receiving the new value and any additional arguments passed to the setter.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`[T, (value: T | ((prevState: T) => T), ...args: A) => void]`
+
+A tuple where:
+
+- First element: The current state value
+- Second element: A setter function that supports both direct values and functional updates, plus additional arguments that are forwarded to onChange
+
+
+## Hook
+
+```ts title='useMediaQuery.ts'
+import * as React from "react";
+
+/**
+ * Manages state that can be either controlled (via props) or uncontrolled (internally).
+ * * This hook is ideal for building components that need to support both patterns
+ * (like a custom Input or Toggle) while maintaining a single setter API.
+ *
+ * @param value - The controlled value from props.
+ * @param defaultValue - The initial value for uncontrolled usage.
+ * @param onChange - Callback triggered when the state changes.
+ */
+export function useControllableState<T, C = T, A extends any[] = []>(
+	value: Exclude<T, undefined>,
+	defaultValue: Exclude<T, undefined> | undefined,
+	onChange?: (v: C, ...args: A) => void,
+): [T, (value: T, ...args: A) => void];
+
+export function useControllableState<T, C = T, A extends any[] = []>(
+	value: Exclude<T, undefined> | undefined,
+	defaultValue: Exclude<T, undefined>,
+	onChange?: (v: C, ...args: A) => void,
+): [T, (value: T, ...args: A) => void];
+
+export function useControllableState<T, C = T, A extends any[] = []>(
+	value: T,
+	defaultValue: T,
+	onChange?: (v: C, ...args: A) => void,
+): [T, (value: T, ...args: A) => void] {
+	useControllableStateWarning(value);
+	const [stateValue, setStateValue] = React.useState(value || defaultValue);
+	const isControlled = value !== undefined;
+
+	let currentValue = isControlled ? value : stateValue;
+	const setValue = React.useCallback(
+		(value: any, ...args: A) => {
+			const onChangeCaller = (value: any, ...onChangeArgs: A) => {
+				if (onChange) {
+					if (!Object.is(currentValue, value)) {
+						onChange(value, ...onChangeArgs);
+					}
+				}
+				if (!isControlled) {
+					// If uncontrolled, mutate the currentValue local variable so that
+					// calling setState multiple times with the same value only emits
+					// onChange once. We do not use a ref for this because we specifically
+					// _do_ want the value to reset every render, and assigning to a ref
+					// in render breaks aborted suspended renders.
+					// eslint-disable-next-line react-hooks/exhaustive-deps
+					currentValue = value;
+				}
+			};
+
+			if (typeof value === "function") {
+				// this supports functional updates
+				// https://reactjs.org/docs/hooks-reference.html#functional-updates
+				//
+				// when someone using useControlledState calls
+				// setControlledState(myFunc) this will call our useState setState with
+				// a function as well which invokes myFunc and calls onChange with the
+				// value from myFunc if we're in an uncontrolled state, then we also
+				// return the value of myFunc which to setState looks as though it was
+				// just called with myFunc from the beginning otherwise we just return
+				// the controlled value, which won't cause a rerender because React
+				// knows to bail out when the value is the same
+				const updateFunction = (oldValue: any, ...functionArgs: A) => {
+					const interceptedValue = value(
+						isControlled ? currentValue : oldValue,
+						...functionArgs,
+					);
+					onChangeCaller(interceptedValue, ...args);
+					if (!isControlled) {
+						return interceptedValue;
+					}
+					return oldValue;
+				};
+				setStateValue(updateFunction as React.SetStateAction<T>);
+			} else {
+				if (!isControlled) {
+					setStateValue(value);
+				}
+				onChangeCaller(value, ...args);
+			}
+		},
+		[isControlled, currentValue, onChange],
+	);
+
+	return [currentValue, setValue];
+}
+
+/**
+ * Runtime warning for switching between controlled and uncontrolled modes.
+ */
+function useControllableStateWarning(controlledValue: unknown) {
+	const warned = React.useRef(false);
+	const wasControlled = React.useRef(controlledValue !== undefined);
+	const isControlled = controlledValue !== undefined;
+	React.useEffect(() => {
+		if (warned.current) {
+			return;
+		}
+		const docsUrl =
+			"https://react.dev/reference/react-dom/components/input#controlling-an-input-with-a-state-variable";
+		const controlledToUncontrolled = wasControlled.current && !isControlled;
+		const uncontrolledToControlled = !wasControlled.current && isControlled;
+		if (controlledToUncontrolled || uncontrolledToControlled) {
+			const wasState = controlledToUncontrolled ? "controlled" : "uncontrolled";
+			const isState = uncontrolledToControlled ? "uncontrolled" : "controlled";
+			const wasValue = controlledToUncontrolled ? "defined" : "undefined";
+			const isValue = uncontrolledToControlled ? "undefined" : "defined";
+			warned.current = true;
+			console.warn(
+				`Warning: A component is changing a ${wasState} input to be ${isState}. This is likely caused by the value changing from a ${wasValue} to ${isValue}, which should not happen. Decide between using a controlled or uncontrolled input element for the lifetime of the component. More info: ${docsUrl}`,
+			);
+		}
+	}, [isControlled]);
+}
+```
+
+## Advanced Examples
+
+### Building a Toggle Component
+
+This example demonstrates creating a fully accessible toggle switch that supports both controlled and uncontrolled usage, complete with ARIA attributes and keyboard support.
+
+```tsx
+import { useControllableState } from '@/hooks/useControllableState';
+
+interface ToggleSwitchProps {
+  isOn?: boolean;
+  defaultIsOn?: boolean;
+  onChange?: (isOn: boolean, event: React.MouseEvent) => void;
+  'aria-label': string;
+}
+
+function ToggleSwitch({
+  isOn,
+  defaultIsOn = false,
+  onChange,
+  'aria-label': ariaLabel,
+}: ToggleSwitchProps) {
+  const [on, setOn] = useControllableState(
+    isOn,
+    defaultIsOn,
+    onChange
+  );
+
+  const handleClick = (event: React.MouseEvent) => {
+    setOn(!on, event);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      setOn(!on, event as unknown as React.MouseEvent);
+    }
+  };
+
+  return (
+    <div
+      role="switch"
+      aria-checked={on}
+      aria-label={ariaLabel}
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className={`toggle ${on ? 'on' : 'off'}`}
+    />
+  );
+}
+```
+
+### Form Component with Validation Context
+
+This example shows how `useControllableState` can be combined with React Context to create a form system where individual fields can be controlled or uncontrolled, while still participating in form-wide validation.
+
+```tsx
+import { createContext, useContext } from 'react';
+import { useControllableState } from './hooks/useControllableState';
+
+interface FormContextType {
+  onFieldChange: (name: string, value: any) => void;
+  values: Record<string, any>;
+}
+
+const FormContext = createContext<FormContextType | null>(null);
+
+interface FormFieldProps {
+  name: string;
+  value?: any;
+  defaultValue?: any;
+  validate?: (value: any) => string | undefined;
+}
+
+function FormField({ name, value, defaultValue, validate }: FormFieldProps) {
+  const form = useContext(FormContext);
+
+  const [fieldValue, setFieldValue] = useControllableState(
+    value,
+    defaultValue,
+    (newValue, event) => {
+      // Call form-level handler if in form context
+      form?.onFieldChange(name, newValue);
+
+      // Run local validation
+      const error = validate?.(newValue);
+      if (error) {
+        console.warn(`Validation error for ${name}:`, error);
+      }
+    }
+  );
+
+  return (
+    <input
+      name={name}
+      value={fieldValue}
+      onChange={(e) => setFieldValue(e.target.value)}
+    />
+  );
+}
+```
+
+## Why use this?
+
+### The Controlled/Uncontrolled Dual-API Pattern
+
+<Callout type="info" title="Design System Foundation">This pattern is used by every major design system (Material-UI, Chakra UI, React Spectrum) because it provides the best of both worlds: **developer convenience** (uncontrolled) and **precise control** (controlled) without API duplication.</Callout>
+
+<Steps>
+   <Step>
+      <h4>Single Source of Truth</h4>
+
+      The hook determines at render time whether the component is controlled (`value !== undefined`) or uncontrolled. This decision is stored in the `isControlled` variable, which gates all subsequent logic. This ensures there's never ambiguity about where the "truth" lives.
+   </Step>
+   <Step>
+      <h4>Functional Update Support</h4>
+
+      The setter function intelligently handles functional updates (like React's `useState`). When a function is passed, it receives either the current controlled value or the previous internal state, depending on the mode. This maintains consistency with React's native APIs.
+   </Step>
+   <Step>
+      <h4>Change Event Optimization</h4>
+
+      The hook uses `Object.is` comparison (same as React) to prevent unnecessary `onChange` calls. This is crucial for performance when the setter might be called rapidly (e.g., in `onChange` handlers).
+   </Step>
+</Steps>
+
+### Advanced Memory Management Techniques
+
+<Callout type="idea" title="Local Variable Optimization">
+  Notice how the hook uses a local variable (`currentValue`) rather than a ref for tracking uncontrolled state between renders. This is intentional.
+</Callout>
+
+
+```ts
+// From the source code:
+if (!isControlled) {
+  currentValue = value; // Not a ref, but a local variable
+}
+```
+
+**Why this matters:**
+
+1. **Render phase safety**: Using a ref during render breaks React's concurrent features (like Suspense) because ref mutations are side effects
+2. **Automatic reset on re-render**: The local variable resets every render, which correctly reflects that uncontrolled state is owned by the component instance
+3. **Functional update consistency**: The value is captured correctly in closures for functional updates
+
+
+### Warning System for Development
+
+The `useControllableStateWarning` effect implements the same warning React gives for native inputs when switching between controlled/uncontrolled modes. This catches a common anti-pattern early:
+
+```tsx
+// ❌ This will trigger the warning
+const [value, setValue] = useState<string>();
+return <FormInput value={value} />; // Initially uncontrolled
+
+// Later, after state is set:
+setValue('hello'); // Now controlled - WARNING!
+```
+
+## Error Handling
+
+### Type Safety with Generics
+
+The hook uses multiple overload signatures to enforce that **either `value` or `defaultValue` must be provided** (but both can be optional). This is achieved through TypeScript's function overloads:
+
+```ts
+// Overload 1: value required, defaultValue optional
+export function useControllableState<T, C = T, A extends any[] = []>(
+  value: Exclude<T, undefined>,
+  defaultValue: Exclude<T, undefined> | undefined,
+  onChange?: (v: C, ...args: A) => void,
+): [T, (value: T, ...args: A) => void];
+
+// Overload 2: value optional, defaultValue required
+export function useControllableState<T, C = T, A extends any[] = []>(
+  value: Exclude<T, undefined> | undefined,
+  defaultValue: Exclude<T, undefined>,
+  onChange?: (v: C, ...args: A) => void,
+): [T, (value: T, ...args: A) => void];
+```
+
+<Callout type="warning" title="Runtime Behavior">
+  While TypeScript provides compile-time safety, the hook also includes runtime warnings. If you provide neither `value` nor `defaultValue`, the state will be `undefined` and the component will be uncontrolled with no initial value.
+</Callout>
+
+### SSR Considerations
+
+<Callout type="info" title="Hydration Safety">
+  Unlike some state hooks, `useControllableState` doesn't require special SSR handling because it follows React's built-in patterns. The initial render (server or client) uses the provided `value` or `defaultValue`, and React handles hydration automatically.
+</Callout>
+
+**Do:**
+
+```tsx
+// ✅ Controlled with explicit server value
+<FormInput value={serverValue} />
+
+// ✅ Uncontrolled with explicit default
+<FormInput defaultValue="initial" />
+```
+
+**Don't:**
+
+```tsx
+// ❌ Ambiguous during SSR - could cause hydration mismatch
+<FormInput value={undefined} defaultValue={undefined} />
+
+// ❌ Switching modes during component lifetime
+const [value, setValue] = useState<string>();
+// Later: setValue('controlled') - triggers warning
+```

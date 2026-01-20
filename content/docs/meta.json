@@ -1,0 +1,13 @@
+{
+  "title": "Docs",
+  "description": "Documentation for hooks",
+  "root": true,
+  "pages": [
+    "---Getting Started---",
+    "introduction",
+    "motivation",
+    "usage",
+    "---Hooks---",
+    "...hooks"
+  ]
+}

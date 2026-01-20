@@ -1,0 +1,327 @@
+---
+title: useDebouncedState
+description: A high-performance React hook for managing debounced state updates in uncontrolled components, ideal for minimizing expensive operations like API calls and heavy re-renders.
+---
+
+## Introduction
+
+The `useDebouncedState` hook solves a common performance problem in React applications: reducing expensive operations triggered by rapid state updates, particularly in uncontrolled components. Unlike traditional debounce implementations that work outside React's state management, this hook provides a React-first approach with built-in cleanup and immediate update options.
+
+## Basic Usage
+
+```tsx
+import { useDebouncedState } from '@/hooks/useDebouncedState';
+
+function SearchInput() {
+  const [debouncedQuery, setDebouncedQuery] = useDebouncedState(initialValue, 300);
+
+  // Your search API call would use debouncedQuery
+  // React.useEffect(() => { ... }, [debouncedQuery]);
+
+  return (
+    <input
+      type="text"
+      defaultValue={initialValue}
+      onChange={(e) => setDebouncedQuery(e.target.value)}
+    />
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    defaultValue: {
+      type: 'T | (() => T)',
+      description: 'Initial state value or initializer function, identical to React.useState',
+      required: true,
+    },
+    delay: {
+      type: 'number',
+      description: 'Debounce delay in milliseconds',
+      required: true,
+    },
+    leading: {
+      type: 'boolean',
+      description: 'Whether to update immediately on first call (defaults to false)',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+A tuple with three elements:
+
+| Index | Name | Type | Description |
+|-------|------|------|-------------|
+| 0 | `value` | `T` | The current debounced state value. |
+| 1 | `setDebounced` | `Function` | Function to update the state with a debounce delay. |
+| 2 | `forceSet` | `Function` | Function to update the state immediately, bypassing the debounce. |
+
+## Hook
+
+```ts title='useDebouncedState.ts'
+import { useCallback, useRef, useState, useEffect } from 'react';
+
+/**
+ * A hook that provides a debounced state and functions to update it.
+ * * **Note:** Specifically designed for **uncontrolled components**.
+ * Use the returned `value` for side effects (like API calls) and provide `defaultValue`
+ * to the input instead of a controlled `value`.
+ *
+ * @example
+ * ```tsx
+ * const [query, setQuery, forceSetQuery] = useDebouncedState('', 300);
+ * return <input defaultValue="" onChange={(e) => setQuery(e.target.value)} />;
+ * ```
+ *
+ * @param defaultValue - Initial state value or initializer function.
+ * @param delay - Delay in milliseconds before updating the state.
+ * @param leading - Whether to update immediately on the first call.
+ * @returns A readonly tuple: [value, setDebounced, forceSet].
+ */
+export function useDebouncedState<T>(
+  defaultValue: T | (() => T),
+  delay: number,
+  leading = false
+) {
+  const [value, setValue] = useState<T>(defaultValue);
+  const isLeadingExecution = useRef(true);
+  const timerIdRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  /**
+   * Clears any active debounce timers.
+   */
+  const clearTimer = useCallback(() => {
+    if (timerIdRef.current) {
+      clearTimeout(timerIdRef.current);
+    }
+  }, []);
+
+  /**
+   * Updates the state after the specified delay.
+   */
+  const setDebouncedValue = useCallback((newValue: T) => {
+    clearTimer();
+
+    if (isLeadingExecution.current && leading) {
+      setValue(newValue);
+    } else {
+      timerIdRef.current = setTimeout(() => {
+        isLeadingExecution.current = true;
+        setValue(newValue);
+      }, delay);
+    }
+
+    isLeadingExecution.current = false;
+  }, [leading, delay, clearTimer]);
+
+  /**
+   * Updates the state immediately, bypassing any debounce delay.
+   */
+  const forceSetValue = useCallback((newValue: T) => {
+    clearTimer();
+    setValue(newValue);
+  }, [clearTimer]);
+
+  // Cleanup on unmount to prevent memory leaks or state updates on unmounted components
+  useEffect(() => {
+    return () => clearTimer();
+  }, [clearTimer]);
+
+  return [value, setDebouncedValue, forceSetValue] as const;
+}
+```
+
+## Advanced Examples
+
+### Search with SWR and useDeferredValue
+
+This example demonstrates combining `useDebouncedState` with `useSWR` for data fetching and `useDeferredValue` for concurrent rendering optimization. The debounce reduces network requests while `useDeferredValue` ensures the UI remains responsive during expensive rendering.
+
+```tsx
+import { useDeferredValue, useCallback } from 'react';
+import useSWR from 'swr';
+import { useDebouncedState } from '@/hooks/useDebouncedState';
+
+const AdvancedSearch = () => {
+  const [debouncedQuery, setDebouncedQuery] = useDebouncedState(initialValue, 300);
+
+  // SWR fetches only when debouncedQuery changes (after 300ms delay)
+  const { data } = useSWR<string[]>(
+    debouncedQuery ? `/api/search?q=${debouncedQuery}` : null
+  );
+
+  // Opt into concurrent rendering for expensive UI updates
+  const deferredResults = useDeferredValue(data);
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setDebouncedQuery(e.target.value);
+    },
+    [setDebouncedQuery]
+  );
+
+  return (
+    <div className="search-container">
+      <input
+        type="search"
+        placeholder="Search products..."
+        defaultValue={initialValue}
+        onChange={handleChange}
+        className="search-input"
+      />
+
+      <SearchResults results={deferredResults} />
+    </div>
+  );
+};
+
+// Memoize to prevent unnecessary re-renders
+const SearchResults = React.memo(({ results }: { results: string[] | undefined }) => {
+  if (!results) return null;
+
+  // Expensive rendering operation
+  return (
+    <div className="results-grid">
+      {results.map((result) => (
+        <div key={result} className="result-item">
+          {result}
+        </div>
+      ))}
+    </div>
+  );
+});
+```
+
+### Immediate Feedback on Form Reset
+
+Sometimes you need to debounce the user input but immediately clear the state when a "Reset" button is clicked. Use the third return value, `forceSetValue`, for these cases.
+
+
+```tsx
+function FilterForm() {
+  const [filter, setFilter, forceSetFilter] = useDebouncedState('', 1000);
+
+  const handleReset = () => {
+    forceSetFilter(''); // Updates state immediately
+  };
+
+  return (
+    <form>
+      <input defaultValue="" onChange={(e) => setFilter(e.target.value)} />
+      <button type="button" onClick={handleReset}>Clear Filter</button>
+      <p>Results for: {filter}</p>
+    </form>
+  );
+}
+```
+
+## Differences with useDebouncedValue
+
+Choosing between these two depends on how you want to manage your component's re-renders.
+
+| Feature | `useDebouncedState` | `useDebouncedValue` |
+| :--- | :--- | :--- |
+| **Component Type** | **Uncontrolled** (Internal state). | **Controlled** (External state). |
+| **Re-renders** | Component only re-renders *after* the delay. | Component re-renders on every keystroke. |
+| **Control** | Provides `forceSet` for immediate updates. | Synchronizes with an existing state. |
+| **Best For** | Heavy optimization of isolated inputs. | When you need the "live" value elsewhere in the UI. |
+
+## Why use this?
+
+### Designed for Uncontrolled Components
+
+<Callout type="info" title="React Pattern Alignment">
+  This hook is specifically designed to work with React's uncontrolled component pattern using `defaultValue` and `onChange`. This makes it ideal for form inputs where you want to avoid the performance overhead of controlled components during rapid user input.
+</Callout>
+
+Traditional debounce implementations either work outside React's state system or create unnecessary re-renders. `useDebouncedState` provides a clean abstraction that:
+
+<Steps>
+  <Step>
+    <h4>Preserves React's State Guarantees</h4>
+
+    Unlike using `setTimeout` directly with state setters, this hook ensures proper cleanup and prevents memory leaks by clearing timeouts on unmount and before setting new ones.
+  </Step>
+  <Step>
+    <h4>Flexible Update Strategies</h4>
+
+    The `leading` option allows immediate first updates (useful for validation), while subsequent updates are debounced. The `forceSetValue` function provides an escape hatch for when you need immediate updates.
+  </Step>
+</Steps>
+
+### Performance Optimizations
+
+<Callout type="warning" title="Timer Management">
+  The hook uses refs to track timers and leading state, preventing unnecessary re-renders and ensuring stable function references across renders.
+</Callout>
+
+Key performance decisions:
+
+1. **Memoized Callbacks**: `debouncedSetValue` and `clearTimer` are wrapped in `useCallback` to maintain stable references
+2. **Single Timer Principle**: Only one timer exists at a time, cleared before setting a new one
+3. **Ref-based State**: Using refs for timer IDs and leading flags avoids triggering re-renders
+
+## Error Handling
+
+<Callout type="error" title="Controlled vs Uncontrolled Conflict">
+  Do not pass the value returned by this hook back into the `value` prop of the input you are debouncing. This will create a conflict where the input "jumps" back to the old value until the debounce timer finishes.
+</Callout>
+
+### The Anti-Pattern
+
+This hook is specifically designed for **uncontrolled components**. Attempting to use it with controlled components creates a problematic feedback loop:
+
+**Incorrect (Controlled):**
+
+```tsx
+// ❌ DON'T: Creating a controlled component with debounced state
+function SearchInput() {
+  const [debouncedQuery, setDebouncedQuery] = useDebouncedState('', 300);
+
+  return (
+    <input
+      type="text"
+      value={debouncedQuery} // ← PROBLEM: Controlled input
+      onChange={(e) => setDebouncedQuery(e.target.value)}
+    />
+  );
+}
+```
+
+**Correct (Uncontrolled):**
+
+```tsx
+// ✅ DO: Use defaultValue for uncontrolled inputs
+function SearchInput() {
+  const [debouncedQuery, setDebouncedQuery] = useDebouncedState('', 300);
+
+  return (
+    <input
+      type="text"
+      defaultValue="" // ← Uncontrolled input
+      onChange={(e) => setDebouncedQuery(e.target.value)}
+    />
+  );
+}
+```
+
+### Server-Side Rendering Considerations
+
+The hook is client-side only. For SSR frameworks like Next.js:
+
+```tsx
+'use client'; // Required for Next.js App Router
+
+import { useDebouncedState } from '@/hooks/useDebouncedState';
+// ... rest of component
+```
+
+<Callout type="info" title="SSR Compatibility">
+  The hook safely initializes with the provided `defaultValue` on both server and client, but debouncing only occurs on the client side.
+</Callout>

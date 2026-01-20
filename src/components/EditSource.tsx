@@ -2,7 +2,7 @@ export const EditSource = ({path}: {path: string | undefined}) => {
   let url: string | undefined;
 
   if (path) {
-    url = `https://github.com/fantasy42/hookipedia/edit/main/content/docs/${path}`;
+    url = `https://github.com/fantasy42/hookipedia/edit/master/content/docs/${path}`;
   }
 
   if (!url) {

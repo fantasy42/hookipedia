@@ -1,0 +1,149 @@
+---
+title: useIsoLayoutEffect
+description: A React hook that automatically chooses between useLayoutEffect and useEffect, solving hydration warnings in isomorphic applications like Next.js.
+---
+
+## Introduction
+
+The `useIsoLayoutEffect` (Isomorphic Layout Effect) hook solves a common friction point in SSR frameworks like Next.js: the "useLayoutEffect does nothing on the server" warning. While `useLayoutEffect` is essential for measuring DOM elements or preventing visual flickers, it cannot execute during server-side rendering because the DOM does not yet exist. This hook ensures your code runs safely on both the server and the client without console noise.
+
+## Basic Usage
+
+```tsx
+import { useIsoLayoutEffect } from '@/hooks/useIsoLayoutEffect';
+import { useRef } from 'react';
+
+function StickyHeader() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useIsoLayoutEffect(() => {
+    const { height } = ref.current.getBoundingClientRect();
+    document.documentElement.style.setProperty('--header-height', `${height}px`);
+  }, []);
+
+  return <header ref={ref}>...</header>;
+}
+```
+
+## API Reference
+
+### Parameters
+
+
+<TypeTable
+  type={{
+    effect: {
+      type: 'EffectCallback',
+      description: 'Imperative function that can optionally return a cleanup function.',
+      required: true,
+    },
+    dependencies: {
+      type: 'DependencyList',
+      description: 'If present, effect will only activate if the values in the list change.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`void` - This hook doesn't return any value, matching the behavior of React's built-in effect hooks.
+
+
+## Hook
+
+```ts title='useIsoLayoutEffect.ts'
+import { useEffect, useLayoutEffect } from 'react'
+
+export const useIsoLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect
+```
+
+## Advanced Examples
+
+### Tooltip Positioning
+When building a tooltip, we need to measure the trigger element's position before the browser paints to avoid a "jump" where the tooltip starts at `0,0` and then snaps to the button.
+
+```tsx title='Tooltip.tsx'
+import { useIsoLayoutEffect } from '@/hooks/useIsoLayoutEffect';
+import { useState, useRef } from 'react';
+
+export function Tooltip({ children, targetRef }) {
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  useIsoLayoutEffect(() => {
+    if (targetRef.current && tooltipRef.current) {
+      const rect = targetRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX,
+      });
+    }
+  }, [targetRef]);
+
+  return <div ref={tooltipRef} style={{ position: 'absolute', ...coords }}>{children}</div>;
+}
+```
+
+### Animating Initial Render
+If we are using an animation library and need to set initial CSS properties based on the rendered DOM before the first frame is painted.
+
+```tsx title='FadeInScale.tsx'
+import { useIsoLayoutEffect } from '@/hooks/useIsoLayoutEffect';
+import { useRef } from 'react';
+
+export function EntranceAnimation() {
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  useIsoLayoutEffect(() => {
+    if (elementRef.current) {
+      // Synchronously set initial state to prevent flash of unstyled content
+      elementRef.current.style.opacity = '0';
+      elementRef.current.style.transform = 'scale(0.9)';
+
+      // Trigger animation on next frame
+      requestAnimationFrame(() => {
+        elementRef.current!.style.transition = 'all 0.5s ease-out';
+        elementRef.current!.style.opacity = '1';
+        elementRef.current!.style.transform = 'scale(1)';
+      });
+    }
+  }, []);
+
+  return <div ref={elementRef}>Content</div>;
+}
+```
+
+## Why use this?
+
+### Silencing Hydration Warnings
+
+When React hydrates on the client, it expects the initial render to match the server-generated HTML exactly. If you use `useLayoutEffect` directly in a component that is server-rendered, React will log an error:
+*"Warning: useLayoutEffect does nothing on the server..."* This happens because the server has no "Layout" phase. By aliasing to `useEffect` on the server, we satisfy React's requirement for a stable hook call order while removing the warning.
+
+### Performance & Visual Stability
+The reason we don't just use `useEffect` everywhere is the **Commit Phase**.
+
+<Steps>
+  <Step>
+    <h4>The Painting Gap</h4>
+
+    `useEffect` runs **asynchronously** after the browser has painted the screen. If you modify the DOM inside `useEffect`, the user might see the original state for one frame before it snaps to the new state (a "flicker").
+  </Step>
+  <Step>
+    <h4>Synchronous Execution</h4>
+
+    On the client, `useIsoLayoutEffect` maps to `useLayoutEffect`, which runs **synchronously** after all DOM mutations but *before* the browser paints. This ensures that any adjustments to styles or positions are visible to the user in the very first frame.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Server-Side Mismatch">
+  Because `useEffect` (on the server) doesn't run at all during the initial string generation, your component might render differently on the server than it does after the layout effect runs on the client.
+</Callout>
+
+* **Don't** use this hook to initialize state that affects the HTML structure (e.g., `if (isMobile) return <Mobile />`). This will cause a hydration mismatch because the server rendered the desktop version and the client suddenly wants to switch.
+* **Do** use this for "progressive enhancement" styles, such as calculating scroll positions, measuring widths for canvas elements, or triggering imperative animations.
+* **Do** ensure that if your effect changes state, you have a default "safe" state that renders correctly on the server.

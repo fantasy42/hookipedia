@@ -1,0 +1,243 @@
+---
+title: useClipboard
+description: A streamlined React hook for the Clipboard API with automated state management, optimized timer handling, and a focus on reliability in modern web environments.
+---
+
+## Introduction
+
+The `useClipboard` hook provides a high-level interface for the browser's **Clipboard API**. It eliminates the manual overhead of managing "copied" success states, clearing stale timeouts, and catching asynchronous errors. This version focuses on a lean, modern implementation that ensures your UI remains in sync with the user's clipboard actions.
+
+## Basic Usage
+
+```tsx
+import { useClipboard } from '@/hooks/useClipboard';
+
+function SimpleCopy({ content }) {
+  const { copy, copied } = useClipboard({ timeout: 1500 });
+
+  return (
+    <button onClick={() => copy(content)}>
+      {copied ? 'Success!' : 'Copy to Clipboard'}
+    </button>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    timeout: {
+      type: 'number',
+      default: '1000',
+      description: 'Duration (ms) before the copied state resets to false.',
+    },
+    onCopyError: {
+      type: '(error: Error) => void',
+      description: 'Optional callback fired when a copy operation fails.',
+    },
+  }}
+/>
+
+
+### Returns
+
+<TypeTable
+  type={{
+    copy: {
+      type: '(value: string) => Promise<void>',
+      description: 'Asynchronous function to write text to the clipboard.',
+    },
+    copied: {
+      type: 'boolean',
+      description: 'Status flag that turns true on success and resets after the timeout.',
+    },
+    error: {
+      type: 'Error | null',
+      description: 'The error object if the last operation failed, otherwise null.',
+    },
+    reset: {
+      type: '() => void',
+      description: 'Forcefully clears both the copied state and any active errors.',
+    },
+  }}
+/>
+
+## Hook
+```ts title='useClipboard.ts'
+import { useState, useRef, useCallback, useEffect } from 'react';
+
+interface UseClipboardOptions {
+  timeout?: number;
+  onCopyError?: (error: Error) => void;
+}
+
+/**
+ * A hook to interact with the Navigator Clipboard API.
+ * * This hook manages the asynchronous nature of clipboard access,
+ * providing reactive state for success/error feedback and automatic
+ * cleanup of transition states.
+ *
+ * @param timeout - Time in ms to keep the `copied` state as true.
+ * @param onCopyError - Callback triggered when the clipboard write fails.
+ */
+export function useClipboard({
+  timeout = 1000,
+  onCopyError,
+}: UseClipboardOptions = {}) {
+  const [error, setError] = useState<Error | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCopyErrorRef = useRef(onCopyError);
+
+  useEffect(() => {
+    onCopyErrorRef.current = onCopyError;
+  }, [onCopyError]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyResult = useCallback(
+    (isCopied: boolean) => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = null;
+      }
+
+      if (isCopied) {
+        setCopied(true);
+        copyTimeoutRef.current = setTimeout(() => {
+          setCopied(false);
+          copyTimeoutRef.current = null;
+        }, timeout);
+      } else {
+        setCopied(false);
+      }
+    },
+    [timeout]
+  );
+
+  const reset = useCallback(() => {
+    setCopied(false);
+    setError(null);
+
+    if (copyTimeoutRef.current !== null) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
+  }, []);
+
+  const copy = useCallback(
+    async (valueToCopy: string) => {
+      setError(null);
+
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(valueToCopy);
+          handleCopyResult(true);
+        } else {
+          throw new Error('Clipboard API is not available.');
+        }
+      } catch (error_: unknown) {
+        const errorInstance =
+          error_ instanceof Error ? error_ : new Error(String(error_));
+        setError(errorInstance);
+        handleCopyResult(false);
+        onCopyErrorRef.current?.(errorInstance);
+      }
+    },
+    [handleCopyResult]
+  );
+
+  return { copy, reset, error, copied };
+}
+```
+
+## Advanced Examples
+
+### Multi-Step Action with Reset
+
+In complex workflows, you might want to clear previous states before starting a new copy action or allow users to manually dismiss an error state.
+
+```tsx
+import { useClipboard } from '@/hooks/useClipboard';
+
+export function KeyManager({ apiKey }) {
+  const { copy, copied, error, reset } = useClipboard({ timeout: 3000 });
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <input type="password" value={apiKey} readOnly />
+        <button onClick={() => copy(apiKey)}>
+          {copied ? 'Copied Key!' : 'Copy Key'}
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-red-500">
+          Error: {error.message}
+          <button onClick={reset} className="ml-2 underline">Try again</button>
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+### Analytics Integration
+
+By leveraging the `onCopyError` option and the stable `copy` function, we can track failed interactions without triggering re-renders of the hook itself.
+
+```tsx title='AnalyticsWrapper.tsx'
+const { copy } = useClipboard({
+  onCopyError: (err) => {
+    // trackException(err);
+    console.warn("Clipboard access denied by user.");
+  }
+});
+
+return <button onClick={() => copy("[https://hookipedia.com](https://hookipedia.com)")}>Share Link</button>;
+```
+
+## Why use this?
+
+### Reference Stability
+
+The `copy` function is memoized via `useCallback`. Furthermore, we store the `onCopyError` callback in a `useRef`.
+
+<Callout type="info" title="Technical Insight">
+  By updating `onCopyErrorRef.current` in a `useEffect`, we allow the `copy` function to access the latest version of your error handler without having to include it in the `useCallback` dependency array. This prevents child components from re-rendering just because your error callback changed.
+</Callout>
+
+### Race Condition Prevention
+
+When a user clicks a copy button rapidly, many implementations suffer from "blinking" where timeouts overlap.
+
+We handle this by explicitly checking `copyTimeoutRef.current`. If a timer is already running, we kill it immediately before starting a new one. This ensures that the `timeout` logic always applies to the **most recent** user action.
+
+### SSR Safety & Cleanup
+
+We perform a safety check for `typeof navigator !== 'undefined'` to prevent crashes during Server-Side Rendering (SSR) or Static Site Generation (SSG). Additionally, the cleanup effect ensures that if a component unmounts while the `copied` state is still `true`, the `setTimeout` is canceled, avoiding memory leaks and potential state updates on unmounted components.
+
+
+## Error Handling
+
+The Clipboard API requires **User Activation** (like a click) and a **Secure Context** (HTTPS).
+
+<Callout type="error" title="Common Pitfall">
+  You cannot call `copy()` inside a `setTimeout` or an asynchronous loop that wasn't directly triggered by a user. If the browser detects a significant delay between the user click and the clipboard call, it will throw a security error.
+</Callout>
+
+
+- **Don't:** Try to copy text automatically on "Page Load" or "Mount".
+- **Do:** Use the `error` state to inform users if their browser blocks clipboard access.
+- **Do:** Use the `reset` function if you want to transition between different types of copyable content.

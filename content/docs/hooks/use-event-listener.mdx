@@ -1,0 +1,315 @@
+---
+title: useEventListener
+description: A declarative React hook for managing DOM event listeners with support for React Refs, window/document strings, and automatic cleanup to prevent memory leaks.
+---
+
+## Introduction
+
+The `useEventListener` hook provides a type-safe, declarative way to manage DOM event listeners. It abstracts away the manual `useEffect` boilerplate, ensuring that listeners are properly attached to targets (including `window` or `document`) and automatically torn down during the cleanup phase to prevent memory leaks.
+
+## Basic Usage
+
+```tsx
+import { useEventListener } from '@/hooks/useEventListener';
+
+function ScrollLogger() {
+  // Safe, string-based target for SSR environments
+  useEventListener('window', 'scroll', () => {
+    console.log('User is scrolling:', window.scrollY);
+  });
+
+  return <div>Check the console while scrolling.</div>;
+}
+```
+
+## API Reference
+
+### Parameters
+<TypeTable
+  type={{
+    element: {
+      type: 'string | RefObject | HTMLElement | Window | Document',
+      description: 'Target for the listener. Supports "window", "document", React Refs, or direct nodes.',
+      required: true,
+    },
+    type: {
+      type: 'string',
+      description: 'The event type to listen for (e.g., "click", "keydown").',
+      required: true,
+    },
+    listener: {
+      type: 'Function',
+      description: 'The callback fired when the event dispatches. Should be memoized.',
+      required: true,
+    },
+    options: {
+      type: 'UseEventListenerOptions',
+      description: 'Configuration for capture, once, passive, signal, and skip.',
+    },
+  }}
+/>
+
+## Hook
+
+```ts title='useEventListener.ts'
+import {useEffect} from 'react';
+
+/**
+ * A React hook to attach an event listener to a DOM node.
+ * Handles automatic attachment in useEffect and teardown in cleanup.
+ *
+ * @example
+ * ```tsx
+ * useEventListener('window', 'resize', (e) => console.log(e));
+ * ```
+ *
+ * @param element - The node reference, "window", or "document".
+ * @param type - The name of the event to listen for.
+ * @param listener - The event listener callback (should be stabilized).
+ * @param options - Characteristics about the event listener.
+ */
+export function useEventListener<K extends keyof WindowEventMap>(
+  element: 'window' | Window | Nullish,
+  type: K,
+  listener: ((evt: WindowEventMap[K]) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<K extends keyof DocumentEventMap>(
+  element: 'document' | Document | Nullish,
+  type: K,
+  listener: ((evt: DocumentEventMap[K]) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<
+  T extends HTMLElement,
+  K extends keyof HTMLElementEventMap,
+>(
+  element: T | RefObject<T> | Nullish,
+  type: K,
+  listener: ((evt: SpecificEvent<HTMLElementEventMap[K], T>) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<K extends keyof HTMLElementEventMap>(
+  element: HTMLElement | RefObject<HTMLElement> | Nullish,
+  type: K,
+  listener: ((evt: HTMLElementEventMap[K]) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<
+  T extends SVGElement,
+  K extends keyof SVGElementEventMap,
+>(
+  element: T | RefObject<T> | Nullish,
+  type: K,
+  listener: ((evt: SpecificEvent<SVGElementEventMap[K], T>) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<K extends keyof SVGElementEventMap>(
+  element: SVGElement | RefObject<SVGElement> | Nullish,
+  type: K,
+  listener: ((evt: SVGElementEventMap[K]) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<
+  T extends Element,
+  K extends keyof ElementEventMap,
+>(
+  element: T | RefObject<T> | Nullish,
+  type: K,
+  listener: ((evt: SpecificEvent<ElementEventMap[K], T>) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener<K extends keyof ElementEventMap>(
+  element: Element | RefObject<Element> | Nullish,
+  type: K,
+  listener: ((evt: ElementEventMap[K]) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void;
+
+export function useEventListener(
+  elementOrRef: any,
+  type: string,
+  listener: ((event: Event) => any) | Nullish,
+  options?: UseEventListenerOptions
+): void {
+  const {
+    capture,
+    once,
+    // default for `passive` is inconsistent between browsers
+    // https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener#specifications
+    passive = false,
+    signal,
+    skip = false,
+  } = options ?? {};
+
+  useEffect(() => {
+    if (!elementOrRef || !listener || skip) {
+      return;
+    }
+
+    let element: any;
+    if (typeof elementOrRef === 'string') {
+      if (elementOrRef === 'window') {
+        element = window;
+      } else if (elementOrRef === 'document') {
+        element = document;
+      } else {
+        throw new Error(
+          `Invalid element reference: "${elementOrRef}". ` +
+            `Expected "window" or "document".`
+        );
+      }
+    } else if (isReactRef(elementOrRef)) {
+      element = elementOrRef.current;
+    } else {
+      element = elementOrRef;
+    }
+
+    if (!element?.addEventListener) {
+      return;
+    }
+
+    const options = {capture, once, passive, signal};
+    element.addEventListener(type, listener, options);
+    return () => {
+      element.removeEventListener(type, listener, options);
+    };
+  }, [listener, capture, elementOrRef, once, passive, signal, skip, type]);
+}
+
+function isReactRef(value: unknown): value is React.RefObject<unknown> {
+  const isRefMaybe =
+    typeof value === 'object' &&
+    value !== null &&
+    'current' in value &&
+    value.current !== null;
+  if (!isRefMaybe) {
+    return false;
+  }
+  // it's technically possible that a `current` value is present. ie. it's
+  // assigned to `window` for some reason, or we're dealing with a Proxy or some
+  // other weird stuff. In this context let's just make sure this is not a DOM
+  // node. Do not use an `instanceof` check here because it may fail for
+  // cross-origin iframes.
+  return !(
+    'document' in value ||
+    'createElement' in value ||
+    'tagName' in value
+  );
+}
+
+/**
+ * An object that specifies characteristics about an event listener.
+ *
+ * @see [MDN: `addEventListener` options](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener#options).
+ */
+export interface UseEventListenerOptions {
+  /**
+   * A boolean value indicating that events of this type will be dispatched to
+   * the registered `listener` before being dispatched to any `EventTarget`
+   * beneath it in the DOM tree. If not specified, defaults to `false`.
+   */
+  capture?: boolean;
+  /**
+   * A boolean value indicating that the `listener` should be invoked at most
+   * once after being added. If `true`, the `listener` would be automatically
+   * removed when invoked. If not specified, defaults to `false`.
+   */
+  once?: boolean;
+  /**
+   * A boolean value that, if `true`, indicates that the function specified by
+   * `listener` will never call `preventDefault()`. If a passive listener does
+   * call `preventDefault()`, the user agent will do nothing other than generate
+   * a console warning. If not specified, defaults to `false`.
+   */
+  passive?: boolean;
+  /**
+   * An `AbortSignal`. The `listener` will be removed when the given
+   * `AbortSignal` object's `abort()` method is called. If not specified, no
+   * `AbortSignal` is associated with the `listener`.
+   */
+  signal?: AbortSignal;
+  /**
+   * A boolean value indicating whether or not the event listener should not be
+   * attached under certain conditions.
+   */
+  skip?: boolean;
+}
+
+type Nullish = null | undefined;
+
+type RefObject<T> =
+  | React.RefObject<T | undefined>
+  | React.MutableRefObject<T | null | undefined>;
+
+type SpecificEvent<BaseEvent extends Event, Target> = Omit<
+  BaseEvent,
+  'currentTarget'
+> & {
+  currentTarget: Target;
+};
+```
+
+## Advanced Examples
+
+### Conditional Listeners with `skip`
+
+Use the `skip` property to prevent attaching listeners until specific state conditions are met, such as when a Modal is actually visible.
+
+```tsx
+function Modal({ isOpen, onClose }) {
+  // Listener only attaches while modal is open
+  useEventListener('window', 'keydown', (e) => {
+    if (e.key === 'Escape') onClose();
+  }, { skip: !isOpen });
+
+  if (!isOpen) return null;
+  return <div className="modal">Press ESC to close</div>;
+}
+```
+
+### Direct Ref Targeting
+
+Passing the `RefObject` itself ensures that the listener is correctly bound even if the DOM element isn't available on the initial render.
+
+```tsx
+const containerRef = useRef<HTMLDivElement>(null);
+
+useEventListener(containerRef, 'mouseenter', () => {
+  console.log('User hovered over the container');
+});
+
+return <div ref={containerRef}>Hover me</div>;
+```
+
+## Why use this?
+
+### SSR Safety
+
+In Next.js or other SSR frameworks, accessing `window` directly at the top level causes errors. By supporting `"window"` as a string, this hook defers access to the `useEffect` phase (client-only), ensuring your code is safe for hydration.
+
+### Ref Object vs. Current Value
+
+<Callout type="info" title="Implementation Detail">
+  We accept the whole `RefObject` instead of `ref.current`. Since refs aren't stateful, passing `ref.current` as a dependency would fail to attach the listener if the node is assigned after the first render.
+</Callout>
+
+### Automatic Cleanup
+
+Manual event management is prone to memory leaks. This hook ensures that `removeEventListener` is called with the exact same parameters used in `addEventListener`, maintaining a clean browser environment.
+
+## Error Handling
+
+<Callout type="warning" title="Listener Stability">
+
+  The `listener` is a dependency of the internal effect. If you define an anonymous function inside your component body without `useCallback`, the listener will detach and re-attach on every render.
+</Callout>
+
+For performance-critical events like `scroll` or `mousemove`, always stabilize your listener or use the `passive: true` option to improve scrolling performance.

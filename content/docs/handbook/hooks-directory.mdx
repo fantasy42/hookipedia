@@ -1,0 +1,89 @@
+---
+title: Hooks Directory
+description: Explore the Hookipedia collection of high-performance, production-ready React hooks designed for modern web development.
+---
+
+## Explore the Collection
+
+The Hookipedia collection is a curated set of production-ready hooks designed to handle complex state, optimize performance, and bridge Web APIs with React's concurrent rendering. Browse the directory below to find the specific tool for your architectural needs.
+
+---
+
+## Foundation Hooks
+
+These hooks solve core React patterns, ensuring your components remain flexible, reusable, and performant across different rendering environments.
+
+<Cards>
+  <Card
+    title="useControllableState"
+    href="/docs/hooks/use-controllable-state"
+  >
+    Seamlessly support both controlled and uncontrolled component patterns without duplicating state logic or API surface.
+  </Card>
+  <Card
+    title="useComposedRefs"
+    href="/docs/hooks/use-composed-refs"
+  >
+    Merge multiple refs into a single callback ref. Fully compatible with React 19 cleanup functions and legacy RefObjects.
+  </Card>
+  <Card
+    title="useIsoLayoutEffect"
+    href="/docs/hooks/use-iso-layout-effect"
+  >
+    Automatically switches between `useLayoutEffect` and `useEffect` to eliminate hydration warnings in isomorphic apps.
+  </Card>
+</Cards>
+
+## Optimization & Performance
+
+Hooks engineered to minimize re-renders, reduce network overhead, and handle asynchronous logic gracefully.
+
+<Cards>
+  <Card
+    title="useDebouncedState"
+    href="/docs/hooks/use-debounced-state"
+  >
+    Manage debounced state updates in uncontrolled inputs to minimize expensive operations like heavy re-renders.
+  </Card>
+  <Card
+    title="useDebouncedValue"
+    href="/docs/hooks/use-debounced-value"
+  >
+    Delay updates to a controlled value, ideal for synchronizing search inputs with expensive API-driven filters.
+  </Card>
+  <Card
+    title="useAbortableEffect"
+    href="/docs/hooks/use-abortable-effect"
+  >
+    Provide automatic cleanup for async effects using `AbortController` to prevent race conditions and memory leaks.
+  </Card>
+</Cards>
+
+## Browser & Web APIs
+
+Declarative wrappers around native Web APIs that handle the "boring parts" like global listeners, timers, and cleanup.
+
+<Cards>
+  <Card
+    title="useMediaQuery"
+    href="/docs/hooks/use-media-query"
+  >
+    Reactive, SSR-safe media query detection optimized with `useSyncExternalStore` and global listener sharing.
+  </Card>
+  <Card
+    title="useEventListener"
+    href="/docs/hooks/use-event-listener"
+  >
+    Declarative event management for DOM elements, window, or document with automatic listener cleanup.
+  </Card>
+  <Card
+    title="useClipboard"
+    href="/docs/hooks/use-clipboard"
+  >
+    A streamlined interface for the Clipboard API featuring automated state management and high reliability.
+  </Card>
+</Cards>
+
+<Callout title="Pro Tip" type="idea">
+  Looking for something specific? Use the search bar (<kbd>Ctrl</kbd> <kbd>K</kbd>) to find hooks by name or functionality instantly.
+</Callout>

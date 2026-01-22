@@ -56,7 +56,7 @@ export default function HomePage() {
               </div>
 
               <Link
-                href="/docs/hooks/use-abortable-effect"
+                href="/docs/handbook/hooks-directory"
                 className="inline-flex items-center justify-center gap-2 w-fit select-none bg-white text-black rounded-full border border-solid border-fd-border px-3 h-9 text-sm font-medium hover:bg-gray-50 outline-none focus-visible:ring-fd-ring focus-visible:ring-[3px]"
               >
                 Explore the Hooks

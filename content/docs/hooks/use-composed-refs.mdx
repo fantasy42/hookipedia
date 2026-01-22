@@ -1,0 +1,195 @@
+---
+title: useComposedRefs
+description: A high-performance React hook that merges multiple refs into a single callback ref, supporting both RefObjects and the new React 19 cleanup functions.
+---
+
+## Introduction
+The `useComposedRefs` hook solves a common architectural challenge in React: **ref contention**. When building low-level UI primitives or reusable components, you often need to access a DOM node via a local ref while simultaneously allowing a consumer of your component to attach their own ref.
+
+This hook intelligently merges multiple refs—whether they are `RefObject` instances or callback refs—into a single stable callback. Crucially, it is future-proofed for **React 19**, handling the new ref cleanup lifecycle automatically.
+
+## Basic Usage
+
+```tsx
+import { useComposedRefs } from '@/hooks/useComposedRefs';
+import { useRef } from 'react';
+
+function MyInput({ forwardedRef }) {
+  const localRef = useRef<HTMLInputElement>(null);
+  const combinedRef = useComposedRefs(localRef, forwardedRef);
+
+  return <input ref={combinedRef} />;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    '...refs': {
+      type: 'Array<Ref<T> | undefined>',
+      description: 'A spread array of refs to be merged. Supports RefObjects, callback refs, and null/undefined values.',
+      required: true,
+    },
+  }}
+/>
+
+### Returns
+
+`React.RefCallback<T>`
+
+A memoized callback function that assigns the DOM node to all provided refs when the component mounts and cleans them up when it unmounts.
+
+## Hook
+```ts title='useComposedRefs.ts'
+import {useCallback} from 'react';
+
+type PossibleRef<T> = React.Ref<T> | undefined;
+
+/**
+ * Set a given ref to a given value
+ * This utility takes care of different types of refs: callback refs and RefObject(s)
+ */
+function setRef<T>(ref: PossibleRef<T>, value: T) {
+  if (typeof ref === 'function') {
+    return ref(value);
+  } else if (ref !== null && ref !== undefined) {
+    (ref as React.MutableRefObject<T | null>).current = value;
+  }
+}
+
+/**
+ * A utility to compose multiple refs together
+ * Accepts callback refs and RefObject(s)
+ */
+function composeRefs<T>(...refs: PossibleRef<T>[]): React.RefCallback<T> {
+  return (node) => {
+    let hasCleanup = false;
+    const cleanups = refs.map((ref) => {
+      const cleanup = setRef(ref, node);
+      if (!hasCleanup && typeof cleanup == 'function') {
+        hasCleanup = true;
+      }
+      return cleanup;
+    });
+
+    // React <19 will log an error to the console if a callback ref returns a
+    // value. We don't use ref cleanups internally so this will only happen if a
+    // user's ref callback returns a value, which we only expect if they are
+    // using the cleanup functionality added in React 19.
+    if (hasCleanup) {
+      return () => {
+        for (const [i, cleanup] of cleanups.entries()) {
+          if (typeof cleanup == 'function') {
+            cleanup();
+          } else {
+            setRef(refs[i], null);
+          }
+        }
+      };
+    }
+  };
+}
+
+/**
+ * A custom hook that composes multiple refs
+ * Accepts callback refs and RefObject(s)
+ *
+ * @example
+ * ```tsx
+ * const combinedRef = useComposedRefs(localRef, forwardedRef);
+ * ```
+ *
+ * @param refs - The refs to merge into a single callback ref.
+ * @returns A memoized callback ref.
+ */
+export function useComposedRefs<T>(
+  ...refs: PossibleRef<T>[]
+): React.RefCallback<T> {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useCallback(composeRefs(...refs), refs);
+}
+```
+
+## Advanced Examples
+
+### Third-Party Library Integration
+
+When using libraries like **Framer Motion** or **Floating UI**, they often require access to the DOM node via a ref. If you also need that node for your own logic (e.g., measuring dimensions), `useComposedRefs` ensures both parties get the reference without conflict.
+
+```tsx
+import { useFloating } from '@floating-ui/react';
+import { useComposedRefs } from '@/hooks/useComposedRefs';
+
+export function Tooltip({ children }) {
+  const { refs: floatingRefs } = useFloating();
+  const myInternalRef = useRef<HTMLElement>(null);
+
+  // Merge the Floating UI reference with our internal one
+  const combinedRef = useComposedRefs(floatingRefs.setReference, myInternalRef);
+
+  return <div ref={combinedRef}>{children}</div>;
+}
+```
+
+### Composing with ForwardRef
+
+In component libraries, you must often forward a ref to a child. By using `useComposedRefs`, you can internally interact with the DOM element while remaining transparent to the parent component.
+
+```tsx
+const Button = forwardRef((props, forwardedRef) => {
+  const innerRef = useRef<HTMLButtonElement>(null);
+  const composedRef = useComposedRefs(forwardedRef, innerRef);
+
+  const handleClick = () => {
+    innerRef.current?.focus(); // Focus locally
+    props.onClick?.();
+  };
+
+  return <button {...props} ref={composedRef} onClick={handleClick} />;
+});
+```
+
+## Why use this?
+
+### React 19 Cleanup Support
+
+In React 19, callback refs can return a **cleanup function**. A naive implementation of a ref merger would ignore these cleanup functions, leading to memory leaks or stale state. Our implementation detects if any of the provided refs return a cleanup function and returns a composite cleanup function that ensures every ref is properly disposed of in the correct order.
+
+### Performance & Stability
+
+<Callout type="idea" title="Stable References">
+  We use `useCallback` with the `refs` array as a dependency. This ensures that the returned function reference only changes when one of the input refs changes, preventing unnecessary re-renders of child components that receive the merged ref.
+</Callout>
+
+### Handling Diversity
+
+Refs in React are notoriously "messy." They can be:
+1. **Objects**: `{ current: T }`
+2. **Callbacks**: `(node) => void`
+3. **Legacy string refs** (though discouraged)
+4. **Null/Undefined**
+
+`useComposedRefs` abstracts this complexity away with the internal `setRef` utility, which handles each case defensively to prevent runtime errors.
+
+## Error Handling
+
+<Callout type="warning" title="Avoid Inline Arrays">
+  Do not pass a newly created array of refs directly into the hook inside the render body if you want to maintain reference stability.
+</Callout>
+
+**Don't:**
+```tsx
+// This creates a new array every render, breaking memoization
+const ref = useComposedRefs([refA, refB]);
+```
+
+**Do:**
+```tsx
+// Pass them as individual arguments
+const ref = useComposedRefs(refA, refB);
+```
+
+The hook handles the spread automatically. If you are using this in an environment without `window` (SSR), the hook remains safe because it only executes its core logic during the React commit phase when the DOM nodes are actually created.

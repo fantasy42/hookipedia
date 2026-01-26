@@ -1,0 +1,181 @@
+---
+title: useInterval
+description: A declarative React hook for setInterval that handles stale closures and dynamic delays without resetting timers. SSR-safe with automatic cleanup.
+---
+
+## Introduction
+
+The `useInterval` hook provides a declarative way to manage intervals in React. In a standard React component, using a raw `setInterval` often leads to "stale closure" problems where the callback captures outdated state or props. This hook solves that by using a **mutable ref** to bridge the gap between the imperative `window.setInterval` and React’s render cycle.
+
+## Basic Usage
+
+```tsx
+import { useState } from 'react';
+import { useInterval } from '@/hooks/useInterval';
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  useInterval(() => {
+    setCount(count + 1);
+  }, 1000);
+
+  return <h1>{count}</h1>;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    callback: {
+      type: '() => void',
+      description: 'The function to be executed at each interval tick.',
+      required: true,
+    },
+    interval: {
+      type: 'number | null | undefined',
+      description: 'Delay in milliseconds. Passing null or undefined pauses the timer.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`void`
+
+This hook manages the side effect internally and does not return a value.``
+
+
+## Hook
+
+```tsx title='useInterval.ts'
+import {useRef, useEffect} from 'react';
+
+/**
+ * Repeatedly executes a function at a set interval.
+ *
+ * @param callback A function to be executed at each interval
+ * @param interval The interval in milliseconds. If this parameter is `null` or
+ *                 `undefined` the timer will be canceled.
+ */
+export function useInterval(
+  callback: () => void,
+  interval?: number | null | undefined
+) {
+  const savedCallback = useRef(callback);
+  useEffect(() => {
+    savedCallback.current = callback;
+  });
+
+  useEffect(() => {
+    const tick = () => savedCallback.current?.();
+    if (interval != null) {
+      const id = setInterval(tick, interval);
+      return () => clearInterval(id);
+    }
+  }, [interval]);
+}
+```
+
+## Advanced Examples
+
+### Dynamic Polling
+
+This example shows how to adjust the polling frequency dynamically based on application state. We can "pause" the interval by passing `null` or speed it up when the user is active.
+
+```tsx
+import { useInterval } from '@/hooks/useInterval';
+
+function PriceTicker({ isVisible }) {
+  const [price, setPrice] = useState(0);
+
+  // Poll every 2 seconds when visible, otherwise pause (null)
+  useInterval(
+    async () => {
+      const data = await fetchPrice();
+      setPrice(data);
+    },
+    isVisible ? 2000 : null
+  );
+
+  return <div>Current Price: {price}</div>;
+}
+```
+
+### Automated Slideshow with Progress
+
+This example demonstrates a UI pattern where the timer must remain consistent even as the state changes. Because the hook doesn't reset the timer when activeIndex updates, the transition occurs at perfect 3-second intervals without the "jitter" caused by restarting the clock on every render.
+
+```tsx
+import { useState } from 'react';
+import { useInterval } from '@/hooks/useInterval';
+
+function AutoCarousel({ slides }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Precise 3s transition, pauses on interaction
+  useInterval(() => {
+    setActiveIndex((prev) => (prev + 1) % slides.length);
+  }, isPaused ? null : 3000);
+
+  return (
+    <div
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      className="carousel-container"
+    >
+      <div className="slide">{slides[activeIndex]}</div>
+      <div className="progress-dots">
+        {slides.map((_, i) => (
+          <div key={i} className={i === activeIndex ? 'active' : ''} />
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+
+## Why use this?
+
+### Solving the Stale Closure Problem
+
+In a naive `useEffect` implementation of `setInterval`, you usually have two choices, both of which are problematic:
+
+1. **Adding state to the dependency array:** This causes the interval to clear and restart on every state change, which jitters the timing.
+2. **Leaving the dependency array empty:** This leads to stale closures, where the interval only sees the initial value of the state from the first render.
+
+### The Ref-Shadowing Pattern
+
+We use a "saved callback" pattern. By storing the `callback` in a `useRef` and updating it on every render, the `setInterval` (which is set up only once or when the `interval` changes) can always call the most recent version of your function.
+
+<Callout type="idea" title="Architecture Note">
+  This is a classic "Escape Hatch" pattern. We are keeping the interval's identity stable while allowing the logic inside the tick to be dynamic and reactive to your component's scope.
+</Callout>
+
+<Steps>
+  <Step>
+    <h4>Callback Syncing</h4>
+
+    The first `useEffect` synchronizes the `useRef` with the latest `callback` provided by the render. This happens after the render but before the next tick.
+  </Step>
+  <Step>
+    <h4>Declarative Control</h4>
+
+    By making the `delay` a dependency, we allow the consumer to start, stop, or change the speed of the interval simply by changing a prop or state value.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Memory Leaks">
+  Always ensure that the `interval` is set to `null` if the component is going to stay mounted but the logic should stop. The hook automatically cleans up the `setInterval` when the component unmounts.
+</Callout>
+
+* **SSR Safety:** This hook is safe for Server-Side Rendering because `useEffect` only runs on the client. On the server, the interval simply never initializes.
+* **Accuracy:** Like all JavaScript intervals, this is not "hard real-time" guaranteed. If the main thread is blocked, the tick may be delayed.

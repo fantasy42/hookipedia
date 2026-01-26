@@ -1,0 +1,175 @@
+---
+title: useTimeout
+description: A declarative React hook for setTimeout that handles stale closures, dynamic delays, and automatic cleanup to prevent memory leaks in React components.
+---
+
+## Introduction
+
+The `useTimeout` hook provides a declarative interface for the native `window.setTimeout` API. While the standard API is imperative and often leads to stale closure bugs in React, this hook ensures the callback always has access to the latest state and props without needing to reset the timer every time a dependency changes.
+
+## Basic Usage
+
+```tsx
+import { useTimeout } from '@/hooks/useTimeout';
+
+function Toast({ onClose }) {
+  // Automatically close the toast after 3 seconds
+  useTimeout(() => {
+    onClose();
+  }, 3000);
+
+  return <div>Action successful!</div>;
+}
+```
+
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    callback: {
+      type: '() => void',
+      description: 'The function to be executed when the timer expires.',
+      required: true,
+    },
+    delay: {
+      type: 'number | null | undefined',
+      description: 'The delay in milliseconds. Passing null or undefined clears the timeout.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`void`
+
+This hook does not return a value; it manages the side effect of the timer internally.
+
+## Hook
+
+```ts title='useTimeout.ts'
+import {useRef, useEffect} from 'react';
+
+/**
+ * Repeatedly executes a function at a set interval.
+ *
+ * @param callback A function to be executed at each interval
+ * @param interval The interval in milliseconds. If this parameter is `null` or
+ *                 `undefined` the timer will be canceled.
+ */
+export function useInterval(
+  callback: () => void,
+  interval?: number | null | undefined
+) {
+  const savedCallback = useRef(callback);
+  useEffect(() => {
+    savedCallback.current = callback;
+  });
+
+  useEffect(() => {
+    const tick = () => savedCallback.current?.();
+    if (interval != null) {
+      const id = setInterval(tick, interval);
+      return () => clearInterval(id);
+    }
+  }, [interval]);
+}
+```
+
+## Advanced Examples
+
+### Temporary UI States
+
+We can use `useTimeout` to handle "flash" messages or temporary confirmation states. Because of the ref-shadowing pattern, the callback will always see the latest state if we need to check conditions before executing.
+
+```tsx
+import { useState } from 'react';
+import { useTimeout } from '@/hooks/useTimeout';
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+
+  useTimeout(() => setCopied(false), copied ? 2000 : null);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+  };
+
+  return <button onClick={handleCopy}>{copied ? 'Copied!' : 'Copy'}</button>;
+}
+```
+
+### Async Success Transition
+
+When performing an async action (like a file upload), we often want to show a "Success" state briefly before transitioning the user back to a main view. `useTimeout` handles this cleanup logic declaratively.
+
+```tsx
+import { useState } from 'react';
+import { useTimeout } from '@/hooks/useTimeout';
+
+export function UploadButton() {
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'success'>('idle');
+
+  // Revert back to idle 2 seconds after success
+  useTimeout(() => {
+    if (status === 'success') setStatus('idle');
+  }, status === 'success' ? 2000 : null);
+
+  const startUpload = async () => {
+    setStatus('uploading');
+    await mockUpload();
+    setStatus('success');
+  };
+
+  return (
+    <button onClick={startUpload} disabled={status !== 'idle'}>
+      {status === 'idle' && 'Upload File'}
+      {status === 'uploading' && 'Uploading...'}
+      {status === 'success' && 'Done!'}
+    </button>
+  );
+}
+```
+
+## Why use this?
+
+### Solving the Stale Closure Problem
+
+In a naive `useEffect` implementation of `setTimeout`, you usually have two choices, both of which are problematic:
+
+1. **Adding state to the dependency array:** This causes the timeout to clear and restart every time the state changes, which effectively "debounces" the timer and prevents it from ever finishing if the user keeps interacting.
+2. **Leaving the dependency array empty:** This leads to stale closures, where the timeout only sees the initial value of the state from the first render.
+
+### The Ref-Shadowing Pattern
+
+We use a "saved callback" pattern. By storing the `callback` in a `useRef` and updating it on every render, the `setTimeout` (which is set up only when the `delay` changes) can always call the most recent version of your function.
+
+<Callout type="idea" title="Architecture Note">
+  This is a classic "Escape Hatch" pattern. We are keeping the timer's identity stable while allowing the logic inside the execution to be dynamic and reactive to your component's scope.
+</Callout>
+
+<Steps>
+  <Step>
+    <h4>Callback Syncing</h4>
+
+    The first `useEffect` synchronizes the `useRef` with the latest `callback` provided by the render. This happens after the render but before the timer triggers.
+  </Step>
+  <Step>
+    <h4>Declarative Control</h4>
+
+    By making the `delay` a dependency, we allow the consumer to start, stop, or reset the timer simply by changing a prop or state value.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Memory Leaks">
+  The hook automatically cleans up the `setTimeout` when the component unmounts. However, if you change the `delay` frequently, a new timer will be created each time.
+</Callout>
+
+* **SSR Safety:** This hook is safe for Server-Side Rendering because `useEffect` only runs on the client.
+* **Non-Blocking:** Just like `useInterval`, this relies on the browser's event loop. If the main thread is heavily occupied, the timeout execution might be delayed beyond the specified time.

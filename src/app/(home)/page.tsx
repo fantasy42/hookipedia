@@ -25,12 +25,12 @@ export default function HomePage() {
           <section className="pt-16 pb-16 md:px-4 space-y-6 text-center mb-12">
             <div className="mx-auto w-full max-w-5xl space-y-5">
               <h1 className="text-balance text-center font-semibold text-4xl sm:text-5xl lg:font-semibold xl:text-6xl">
-                Build Confidently with Battle-Tested React Hooks
+                The Encyclopedia of Production Ready React Hooks
               </h1>
               <p className="mx-auto max-w-3xl text-fd-muted-foreground text-pretty sm:text-xl">
-                Hookipedia is the definitive, community-vetted knowledge base
-                for understanding, evaluating, and implementing the best custom
-                React hooks. Stop guessing. Start building.
+                The definitive encyclopedia for production ready React hooks.
+                Stop guessing and start building with community-vetted,
+                high-performance logic.
               </p>
             </div>
             <div className="inline-flex gap-4">
@@ -49,9 +49,9 @@ export default function HomePage() {
                 <p className="sm:text-lg text-fd-muted-foreground text-pretty">
                   {`Hookipedia doesn't ship an NPM package. We ship `}
                   <span className="font-medium">clarity</span>. We meticulously
-                  document and analyze standalone custom hooks, providing you
-                  with the deep understanding needed to integrate them into your
-                  projects with confidence.
+                  document and analyze standalone production ready hooks,
+                  providing you with the deep understanding needed to integrate
+                  them into your projects with confidence.
                 </p>
               </div>
 
@@ -84,10 +84,10 @@ export default function HomePage() {
                     content: (
                       <p className="font-medium text-fd-muted-foreground">
                         <span className="font-semibold text-fd-accent-foreground text-pretty">
-                          See the full API.
+                          Audit the API.
                         </span>{' '}
-                        Understand its edge cases and performance implications
-                        before you write a line of code.
+                        Understand edge cases and production ready performance
+                        implications before you write a line of code.
                       </p>
                     ),
                     icon: (
@@ -113,10 +113,10 @@ export default function HomePage() {
                     content: (
                       <p className="font-medium text-fd-muted-foreground">
                         <span className="font-semibold text-fd-accent-foreground text-pretty">
-                          Learn the “why” behind the implementation.
+                          Master the Why.
                         </span>{' '}
-                        Explore the detailed rationale and alternative
-                        approaches to grasp the core concepts.
+                        Explore the encyclopedic rationale and alternative
+                        approaches to grasp core concepts deeply.
                       </p>
                     ),
                     icon: (
@@ -143,10 +143,10 @@ export default function HomePage() {
                     content: (
                       <p className="font-medium text-fd-muted-foreground text-pretty">
                         <span className="font-semibold text-fd-accent-foreground">
-                          Select the right abstraction.
+                          Select the Best.
                         </span>{' '}
-                        Avoid over-engineering or fragile solutions by matching
-                        the hook to your specific use case.
+                        Avoid over-engineering. Match the right React hook to
+                        your specific use case for stable, scalable apps.
                       </p>
                     ),
                     icon: (
@@ -207,7 +207,7 @@ function CtaLink({href, ...ctaLinkProps}: React.ComponentProps<typeof Link>) {
 }
 
 const description =
-  'The encyclopedia of custom React hooks. Hookipedia helps developers find, evaluate, and implement reusable hooks with comprehensive documentation.';
+  'The definitive encyclopedia for production ready React hooks. Evaluate, understand, and implement high-quality, reusable hooks with comprehensive documentation.';
 
 export const metadata: Metadata = {
   description,

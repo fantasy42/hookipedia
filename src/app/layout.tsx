@@ -44,7 +44,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(baseUrl),
   title: {
     template: '%s | Hookipedia',
-    default: 'Hookipedia',
+    default: 'Hookipedia: The Encyclopedia of Production Ready React Hooks',
   },
   twitter: {
     site: '@hookipedia',

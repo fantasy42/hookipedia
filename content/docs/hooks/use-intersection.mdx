@@ -1,0 +1,329 @@
+---
+title: useIntersection
+description: A high-performance visibility tracker using the Intersection Observer API with global observer pooling and requestIdleCallback fallbacks.
+---
+
+## Introduction
+
+The `useIntersection` hook offers a highly optimized way to track when elements enter or exit the viewport. Unlike standard implementations that create a new `IntersectionObserver` instance for every component, this hook uses a **singleton observer pool** to minimize main-thread work. It is particularly effective for performance-critical tasks like lazy-loading images, infinite scroll, and trigger-based animations.
+
+## Basic Usage
+
+```tsx
+import { useIntersection } from '@/hooks/useIntersection';
+
+function LazyImage({ src }) {
+  const [setRef, isVisible] = useIntersection<HTMLImageElement>({
+    rootMargin: '200px',
+  });
+
+  return (
+    <img
+      ref={setRef}
+      src={isVisible ? src : 'placeholder.jpg'}
+      alt="Lazy loaded content"
+    />
+  );
+}
+```
+
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    rootRef: {
+      type: 'React.RefObject<HTMLElement> | null',
+      description: 'The element used as the viewport. Defaults to the browser viewport.',
+      required: false,
+    },
+    rootMargin: {
+      type: 'string',
+      description: 'Margin around the root. Effectively grows or shrinks the root boundary.',
+      required: false,
+    },
+    disabled: {
+      type: 'boolean',
+      description: 'If true, stops observing and halts visibility updates.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`[(element: T | null) => void, boolean, () => void]`
+
+1. **`setRef`**: A callback ref function to be attached to the target element.
+2. **`isVisible`**: A boolean indicating if the element has intersected the root.
+3. **`resetVisible`**: A function to manually reset the visibility state to `false`.
+
+## Hook
+
+```ts title='useIntersection.ts'
+import {useCallback, useEffect, useRef, useState} from 'react';
+
+type UseIntersectionObserverInit = Pick<
+  IntersectionObserverInit,
+  'rootMargin' | 'root'
+>;
+
+export type UseIntersectionArgs = {
+  disabled?: boolean;
+} & UseIntersectionObserverInit & {
+    rootRef?: React.RefObject<HTMLElement> | null;
+  };
+type ObserveCallback = (isVisible: boolean) => void;
+interface Identifier {
+  root: Element | Document | null;
+  margin: string;
+}
+interface Observer {
+  id: Identifier;
+  observer: IntersectionObserver;
+  elements: Map<Element, ObserveCallback>;
+}
+
+const hasIntersectionObserver = typeof IntersectionObserver === 'function';
+
+/**
+ * A hook to interact with the Intersection Observer API.
+ * This hook manages efficient observation of DOM elements by pooling
+ * observers with identical configurations (root and margin) to minimize
+ * browser overhead and memory usage.
+ *
+ * @param rootRef - Optional React ref for the ancestor element acting as the viewport.
+ * @param rootMargin - Margin around the root to expand or contract the intersection area.
+ * @param disabled - If true, prevents the observer from attaching or tracking visibility.
+ */
+export function useIntersection<T extends Element>({
+  rootRef,
+  rootMargin,
+  disabled,
+}: UseIntersectionArgs): [(element: T | null) => void, boolean, () => void] {
+  const [visible, setVisible] = useState(false);
+  const elementRef = useRef<T | null>(null);
+
+  useEffect(() => {
+    if (hasIntersectionObserver) {
+      if (disabled || visible) return;
+
+      const el = elementRef.current;
+      if (el?.tagName) {
+        return observe(el, (isVisible) => isVisible && setVisible(true), {
+          root: rootRef?.current,
+          rootMargin,
+        });
+      }
+    }
+    if (!visible) {
+      const idleCallback = requestIdleCallback(() => setVisible(true));
+      return () => cancelIdleCallback(idleCallback);
+    }
+  }, [disabled, rootMargin, rootRef, visible]);
+
+  const resetVisible = useCallback(() => {
+    setVisible(false);
+  }, []);
+
+  const setRef = useCallback((el: T | null) => {
+    elementRef.current = el;
+  }, []);
+
+  return [setRef, visible, resetVisible];
+}
+
+const observers = new Map<Identifier, Observer>();
+const idList: Identifier[] = [];
+
+function observe(
+  element: Element,
+  callback: ObserveCallback,
+  options: UseIntersectionObserverInit
+): () => void {
+  const {id, observer, elements} = createObserver(options);
+  elements.set(element, callback);
+
+  observer.observe(element);
+  return function unobserve(): void {
+    elements.delete(element);
+    observer.unobserve(element);
+
+    // Destroy observer when there's nothing left to watch:
+    if (elements.size === 0) {
+      observer.disconnect();
+      observers.delete(id);
+      const index = idList.findIndex(
+        (obj) => obj.root === id.root && obj.margin === id.margin
+      );
+      if (index !== -1) {
+        idList.splice(index, 1);
+      }
+    }
+  };
+}
+
+function createObserver(options: UseIntersectionObserverInit): Observer {
+  const root = options.root || null;
+  const margin = options.rootMargin || '';
+
+  let id = idList.find((obj) => obj.root === root && obj.margin === margin);
+
+  if (id) {
+    const instance = observers.get(id);
+    if (instance) return instance;
+  }
+
+  id = {root, margin};
+
+  const elements = new Map<Element, ObserveCallback>();
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const callback = elements.get(entry.target);
+      const isVisible = entry.isIntersecting || entry.intersectionRatio > 0;
+      if (callback && isVisible) {
+        callback(isVisible);
+      }
+    }
+  }, options);
+
+  const instance: Observer = {
+    id,
+    observer,
+    elements,
+  };
+
+  idList.push(id);
+  observers.set(id, instance);
+  return instance;
+}
+
+/**
+ * Polyfill for requestIdleCallback to ensure compatibility across all browsers.
+ * If the native API is unavailable, it falls back to a setTimeout implementation
+ * that approximates idle behavior by yielding to the main thread.
+ */
+export const requestIdleCallback =
+  (typeof self !== 'undefined' &&
+    self.requestIdleCallback &&
+    self.requestIdleCallback.bind(self)) ||
+  function (cb: IdleRequestCallback): number {
+    const start = Date.now();
+    return self.setTimeout(() => {
+      cb({
+        didTimeout: false,
+        timeRemaining() {
+          return Math.max(0, 50 - (Date.now() - start));
+        },
+      });
+    }, 1);
+  };
+
+/**
+ * Polyfill for cancelIdleCallback matching the requestIdleCallback fallback logic.
+ */
+export const cancelIdleCallback =
+  (typeof self !== 'undefined' &&
+    self.cancelIdleCallback &&
+    self.cancelIdleCallback.bind(self)) ||
+  function (id: number) {
+    return clearTimeout(id);
+  };
+```
+
+## Advanced Examples
+
+### Lazy-Loading Thumbnail Component
+
+This example demonstrates a reusable `Thumbnail` component that leverages `useIntersection` for efficient image loading. It uses a **callback ref** to ensure the observer correctly attaches even when the component is conditionally rendered, and uses a 1x1 transparent pixel as a placeholder until the element enters the viewport.
+
+```tsx
+import { useCallback } from 'react';
+import { useIntersection } from '@/hooks/useIntersection';
+
+interface ThumbnailProps {
+  src: string;
+  alt: string;
+  isLazy?: boolean;
+}
+
+const Thumbnail = ({ src, alt, isLazy }: ThumbnailProps) => {
+  const [setIntersection, isIntersected] = useIntersection<HTMLImageElement>({
+    rootMargin: '200px',
+    disabled: !isLazy
+  });
+
+  const handleRef = useCallback((el: HTMLImageElement | null) => {
+    if (isLazy) {
+      setIntersection(el);
+    }
+  }, [isLazy, setIntersection]);
+
+  return (
+    <img
+      ref={handleRef}
+      decoding="async"
+      alt={alt}
+      src={isIntersected || !isLazy
+        ? src
+        : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      }
+    />
+  );
+};
+```
+
+### Analytics Viewability Tracking
+
+Track when a specific advertisement or call-to-action is actually seen by the user for "viewability" metrics.
+
+```tsx
+import { useIntersection } from '@/hooks/useIntersection';
+
+export function AdComponent() {
+  const [ref, isVisible] = useIntersection<HTMLDivElement>({
+    rootMargin: '0px',
+  });
+
+  useEffect(() => {
+    if (isVisible) {
+      sendAnalytics('ad_viewed');
+    }
+  }, [isVisible]);
+
+  return <div ref={ref} className="ad-container">Sponsored Content</div>;
+}
+```
+
+
+
+## Why use this?
+
+### Global Observer Pooling
+
+Most hooks create a `new IntersectionObserver()` for every component instance. If you have a list of 100 images, you have 100 observers. This implementation uses an internal **Observer Map**. It identifies observers by their `root` and `rootMargin`.
+
+If multiple hooks share the same configuration, they share the **same observer instance**, drastically reducing memory overhead and CPU cycles by centralizing the browser's intersection logic.
+
+### Resilience & Fallbacks
+
+We handle environments where `IntersectionObserver` might be missing or where the browser is under heavy load:
+
+* **Feature Detection**: Checks for the existence of the API before attempting to initialize.
+* **Idle Callback Fallback**: If the API is missing or the environment is restricted, we use `requestIdleCallback`. This ensures that even if visibility cannot be measured, the content eventually "loads" when the browser is idle, preventing broken UI.
+* **Automatic Cleanup**: When an element is unmounted, the hook removes it from the shared observer. If an observer has no more elements to watch, it is `disconnected` and purged from the global map to prevent memory leaks.
+
+### Callback Ref Pattern
+
+By returning a `setRef` callback instead of a standard `useRef` object, we ensure the hook reacts correctly even if the DOM element is rendered conditionally or changes identity.
+
+## Error Handling
+
+<Callout type="warning" title="Element Selection">
+  Always pass the `setRef` to the actual DOM element you wish to track. If you pass it to a custom React component, ensure that component uses `forwardRef` to pass the ref down to a valid DOM node.
+</Callout>
+
+* **SSR Compatibility**: The hook includes a `hasIntersectionObserver` check. On the server, it will not attempt to fire browser APIs, avoiding hydration mismatches or environment crashes.
+* **Stale References**: If the `disabled` prop is toggled, the hook automatically cleans up the existing listener.

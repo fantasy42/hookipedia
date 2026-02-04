@@ -1,0 +1,131 @@
+---
+title: useOnMount
+description: A semantic, SSR-safe hook to execute code exactly once during component mount. Eliminates the ambiguity of empty dependency arrays and prevents linter noise.
+---
+
+## Introduction
+
+The `useOnMount` hook is a refined alternative to the standard `useEffect(callback, [])` pattern. While an empty dependency array technically achieves a mount-only effect, it often leads to confusion during code reviews and triggers persistent ESLint warnings. `useOnMount` provides a clear, declarative API that signals your intent to both the team and the compiler.
+
+## Basic Usage
+
+```tsx
+import { useOnMount } from '@/hooks/useOnMount';
+
+function Initializer() {
+  useOnMount(() => {
+    console.log("Component mounted: Initializing persistent resources.");
+  });
+
+  return <div>Component is active.</div>;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    effect: {
+      type: 'React.EffectCallback',
+      description: 'The logic to run on mount. Can return a cleanup function to be executed on unmount.',
+      required: true,
+    },
+  }}
+/>
+
+### Returns
+
+`void`
+
+## Hook
+```ts title='useOnMount.ts'
+'use client';
+import { useEffect } from 'react';
+
+const EMPTY = [] as unknown[];
+
+/**
+ * A React.useEffect equivalent that runs once, when the component is mounted.
+ */
+export function useOnMount(effect: React.EffectCallback) {
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(effect, EMPTY);
+  /* eslint-enable react-hooks/exhaustive-deps */
+}
+```
+
+## Advanced Examples
+
+### Initializing Third-Party Libraries
+
+Many non-React libraries (like Mapbox, Canvas engines, or Charting libs) require a manual initialization step that should never be re-triggered by component updates.
+
+```tsx
+import { useRef } from 'react';
+import { useOnMount } from '@/hooks/useOnMount';
+import { MyChartLib } from 'third-party-library';
+
+export function ChartComponent() {
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  useOnMount(() => {
+    const chart = MyChartLib.init(chartRef.current);
+
+    return () => chart.destroy(); // Cleanup works exactly like useEffect
+  });
+
+  return <div ref={chartRef} />;
+}
+```
+
+### Event Bus Subscriptions
+
+When working with global event systems or `BroadcastChannel`, we want to subscribe exactly once during the lifecycle.
+
+```tsx
+import { useOnMount } from '@/hooks/useOnMount';
+
+export function NotificationListener() {
+  useOnMount(() => {
+    const handleMessage = (e: MessageEvent) => console.log(e.data);
+    const channel = new BroadcastChannel('app_updates');
+
+    channel.onmessage = handleMessage;
+
+    return () => channel.close();
+  });
+
+  return null;
+}
+```
+
+## Why use this?
+
+### Developer Intent & Readability
+
+Standard `useEffect(fn, [])` is often a source of friction. Juniors might wonder if the empty array was a mistake, and seniors have to verify if dependencies were omitted intentionally. `useOnMount` replaces "how we do it" with "what we are doing."
+
+### Silencing the Linter Safely
+
+The `react-hooks/exhaustive-deps` rule is vital, but for specific initialization logic, it often flags variables that *technically* shouldn't trigger a re-run.
+
+<Callout type="idea" title="Architecture Note">
+  By isolating the `eslint-disable` directive inside this hook, we keep our business components clean. We avoid littering our codebase with linter-disable comments, ensuring that the rest of your app remains strictly checked.
+</Callout>
+
+### Memory Efficiency
+
+The hook uses a static `EMPTY` constant defined outside the function scope. This prevents the allocation of a new array literal `[]` on every single render of every component using this hook, providing a micro-optimization for high-frequency rendering scenarios.
+
+## Error Handling
+
+<Callout type="warning" title="Strict Mode Behavior">
+  In React 18+ Development Mode, your mount effects will run **twice**. This is intentional behavior by the React team to help you surface missing cleanup functions. `useOnMount` does not bypass this check; ensure your `fn` returns a proper cleanup if it performs side effects.
+</Callout>
+
+### Common Pitfalls
+
+* **Don't** use this if you need to react to prop changes. If your logic depends on a value that changes over time, use the standard `useEffect`.
+* **Don't** use this for data fetching if you are using React 19; consider the `use` API or a library like TanStack Query for better integration with Suspense.

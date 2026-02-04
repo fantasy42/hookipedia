@@ -1,0 +1,132 @@
+---
+title: useIsClient
+description: A high-performance synchronization hook that identifies the client environment using useSyncExternalStore to prevent hydration mismatches and flickering.
+---
+
+## Introduction
+
+In modern React frameworks like Next.js, determining whether code is executing on the server or the client is crucial for accessing browser-only APIs. The `useIsClient` hook solves the "Hydration Mismatch" problem by providing a reliable, performant way to gate client-side logic without the overhead of traditional `useEffect` hacks.
+
+## Basic Usage
+
+```tsx
+import { useIsClient } from '@/hooks/useIsClient';
+
+function ClientOnlyComponent() {
+  const isClient = useIsClient();
+
+  return <div>{isClient ? 'Client' : 'Server'}</div>;
+}
+```
+## API Reference
+
+### Returns
+
+`boolean`
+
+`false` during SSR and the initial hydration pass; `true` once the component is mounted on the client.
+
+
+## Hook
+
+```ts title='useIsClient.ts'
+import { useSyncExternalStore } from 'react';
+
+function NOOP(): any {}
+
+function trueFn() {
+  return true;
+}
+function falseFn() {
+  return false;
+}
+
+/**
+ * Returns true if the component is rendered on the client, false otherwise.
+ */
+export function useIsClient() {
+  // 1. NOOP: No subscription needed as the value only changes once
+  // 2. trueFn: The value on the client
+  // 3. falseFn: The value on the server
+  return useSyncExternalStore(NOOP, trueFn, falseFn);
+}
+```
+
+## Advanced Examples
+
+### Theme Toggling with Hydration Guard
+
+When a user visits your site, the server renders the "default" theme because it cannot read `localStorage`. Once the client-side JavaScript loads, the theme might "flip" to the user's preference. Using `useIsClient` ensures your UI doesn't flicker or show incorrect labels during this sensitive transition.
+
+```tsx title='ThemeToggle.tsx'
+import { useCallback } from 'react';
+import { useIsClient } from '@/hooks/useIsClient';
+import { useTheme } from '@/hooks/useTheme';
+
+export const ThemeToggle = () => {
+  const [theme, setTheme] = useTheme();
+  const isClient = useIsClient();
+
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  }, [theme, setTheme]);
+
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className="rounded-lg border px-4 py-2"
+    >
+      {isClient && theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+    </button>
+  );
+}
+```
+
+### Safely Mounting Third-Party Widgets
+
+Library components like Google Maps, Stripe Elements, or Lottie animations often attempt to manipulate the DOM immediately. Wrapping them in an `isClient` check prevents server-side crashes.
+
+```tsx
+import { useIsClient } from '@/hooks/useIsClient';
+import { GoogleMap } from 'react-google-maps-api';
+
+export function MapWidget() {
+  const isClient = useIsClient();
+
+  if (!isClient) {
+    return <div className="h-[400px] w-full bg-slate-200" />;
+  }
+
+  return <GoogleMap mapContainerClassName="h-[400px] w-full" center={{ lat: 0, lng: 0 }} zoom={10} />;
+}
+```
+
+## Why use this?
+
+### Efficient Hydration
+
+The standard way to detect the client is using `useEffect` with a `boolean` state. However, that approach forces an **additional re-render** after the initial mount.
+
+<Callout type="info" title="The useSyncExternalStore Edge">
+  By using `useSyncExternalStore`, we hook directly into React's transition logic. React uses the third argument (`falseFn`) for the server snapshot and the second argument (`trueFn`) for the client. This allows React to handle the discrepancy between server and client values during hydration much more gracefully than a state update.
+</Callout>
+
+### Optimized Memory Footprint
+
+We use static function references (`NOOP`, `trueFn`, `falseFn`) defined outside the hook. This prevents the overhead of creating new function closures on every render, making this one of the "cheapest" hooks in terms of memory and CPU cycles.
+
+### Zero-Listener Subscription
+
+Since the "client" status of an environment is constant once the app has loaded, we pass `NOOP` as the subscribe function. This tells React there's no need to set up or tear down event listeners, further optimizing performance.
+
+## Error Handling
+
+<Callout type="warning" title="Design for Hydration">
+  Even with this hook, the server-rendered HTML must ideally match the initial client-rendered HTML structure to avoid "Layout Shift." Use placeholders or skeletons that occupy the same space as the eventual client content.
+</Callout>
+
+### Constraints
+
+* **Client Components Only:** Since this relies on `useSyncExternalStore` and browser detection, it must be used within a file marked with the `'use client'` directive.
+* **No Server Logic:** Do not use the result of this hook to perform security-sensitive logic (like authentication checks) that should have been handled on the server.

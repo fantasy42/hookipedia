@@ -14,23 +14,20 @@ The Hookipedia collection is a curated set of production-ready hooks designed to
 These hooks solve core React patterns, ensuring your components remain flexible, reusable, and performant across different rendering environments.
 
 <Cards>
-  <Card
-    title="useControllableState"
-    href="/docs/hooks/use-controllable-state"
-  >
+  <Card title="useControllableState" href="/docs/hooks/use-controllable-state">
     Seamlessly support both controlled and uncontrolled component patterns without duplicating state logic or API surface.
   </Card>
-  <Card
-    title="useComposedRefs"
-    href="/docs/hooks/use-composed-refs"
-  >
+
+  <Card title="useComposedRefs" href="/docs/hooks/use-composed-refs">
     Merge multiple refs into a single callback ref. Fully compatible with React 19 cleanup functions and legacy RefObjects.
   </Card>
-  <Card
-    title="useIsoLayoutEffect"
-    href="/docs/hooks/use-iso-layout-effect"
-  >
+
+  <Card title="useIsoLayoutEffect" href="/docs/hooks/use-iso-layout-effect">
     Automatically switches between `useLayoutEffect` and `useEffect` to eliminate hydration warnings in isomorphic apps.
+  </Card>
+
+  <Card title="useRefWithInit" href="/docs/hooks/use-ref-with-init">
+    A performance-optimized `useRef` alternative that supports lazy initialization to prevent unnecessary object creation.
   </Card>
 </Cards>
 
@@ -39,23 +36,20 @@ These hooks solve core React patterns, ensuring your components remain flexible,
 Hooks engineered to minimize re-renders, reduce network overhead, and handle asynchronous logic gracefully.
 
 <Cards>
-  <Card
-    title="useDebouncedState"
-    href="/docs/hooks/use-debounced-state"
-  >
+  <Card title="useDebouncedState" href="/docs/hooks/use-debounced-state">
     Manage debounced state updates in uncontrolled inputs to minimize expensive operations like heavy re-renders.
   </Card>
-  <Card
-    title="useDebouncedValue"
-    href="/docs/hooks/use-debounced-value"
-  >
+
+  <Card title="useDebouncedValue" href="/docs/hooks/use-debounced-value">
     Delay updates to a controlled value, ideal for synchronizing search inputs with expensive API-driven filters.
   </Card>
-  <Card
-    title="useAbortableEffect"
-    href="/docs/hooks/use-abortable-effect"
-  >
+
+  <Card title="useAbortableEffect" href="/docs/hooks/use-abortable-effect">
     Provide automatic cleanup for async effects using `AbortController` to prevent race conditions and memory leaks.
+  </Card>
+
+  <Card title="useIntersection" href="/docs/hooks/use-intersection">
+    High-performance visibility tracker using the Intersection Observer API with global observer pooling.
   </Card>
 </Cards>
 
@@ -64,23 +58,42 @@ Hooks engineered to minimize re-renders, reduce network overhead, and handle asy
 Declarative wrappers around native Web APIs that handle the "boring parts" like global listeners, timers, and cleanup.
 
 <Cards>
-  <Card
-    title="useMediaQuery"
-    href="/docs/hooks/use-media-query"
-  >
+  <Card title="useMediaQuery" href="/docs/hooks/use-media-query">
     Reactive, SSR-safe media query detection optimized with `useSyncExternalStore` and global listener sharing.
   </Card>
-  <Card
-    title="useEventListener"
-    href="/docs/hooks/use-event-listener"
-  >
+
+  <Card title="useEventListener" href="/docs/hooks/use-event-listener">
     Declarative event management for DOM elements, window, or document with automatic listener cleanup.
   </Card>
-  <Card
-    title="useClipboard"
-    href="/docs/hooks/use-clipboard"
-  >
+
+  <Card title="useClipboard" href="/docs/hooks/use-clipboard">
     A streamlined interface for the Clipboard API featuring automated state management and high reliability.
+  </Card>
+
+  <Card title="usePrefersReducedMotion" href="/docs/hooks/use-prefers-reduced-motion">
+    Detect user motion preferences via the `prefers-reduced-motion` query, optimized for performance and SSR safety.
+  </Card>
+</Cards>
+
+## Utility & Lifecycle
+
+Specialized hooks for managing component lifecycles, timing, and environment synchronization.
+
+<Cards>
+  <Card title="useIsClient" href="/docs/hooks/use-is-client">
+    Identify the client environment using `useSyncExternalStore` to prevent hydration mismatches and flickering.
+  </Card>
+
+  <Card title="useOnMount" href="/docs/hooks/use-on-mount">
+    Execute code exactly once during component mount. Eliminates the ambiguity of empty dependency arrays.
+  </Card>
+
+  <Card title="useInterval" href="/docs/hooks/use-interval">
+    A declarative hook for `setInterval` that handles stale closures and dynamic delays without resetting timers.
+  </Card>
+
+  <Card title="useTimeout" href="/docs/hooks/use-timeout">
+    Declarative `setTimeout` management with automatic cleanup to prevent memory leaks in React components.
   </Card>
 </Cards>
 

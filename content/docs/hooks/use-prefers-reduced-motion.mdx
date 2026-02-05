@@ -1,0 +1,165 @@
+---
+title: usePrefersReducedMotion
+description: A React hook for detecting user motion preferences via the prefers-reduced-motion media query, optimized for performance and SSR safety using useSyncExternalStore.
+---
+
+## Introduction
+
+The `usePrefersReducedMotion` hook allows your application to respect a user's operating system settings for reduced motion. By detecting this preference, you can programmatically disable heavy animations or transitions, making your site more accessible to users with vestibular disorders or motion sensitivities.
+
+
+## Basic Usage
+
+```tsx
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+
+function HeroSection() {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  return (
+    <div className={prefersReducedMotion ? 'fade-in' : 'slide-and-zoom'}>
+      <h1>Welcome to Hookipedia</h1>
+    </div>
+  );
+}
+```
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    serverValue: {
+      type: 'boolean',
+      description: 'The fallback value used during Server-Side Rendering (SSR) and hydration.',
+      default: 'false',
+    },
+  }}
+/>
+
+### Returns
+
+`boolean`
+
+Returns `true` if the user has requested the system to minimize the amount of non-essential motion.
+
+## Hook
+
+```ts title='usePrefersReducedMotion.ts'
+import { useSyncExternalStore } from 'react';
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+const getMql = () =>
+  typeof window === 'undefined'
+    ? null
+    : window.matchMedia(REDUCED_MOTION_QUERY);
+
+/**
+ * Global subscriber for the media query change event.
+ */
+function subscribe(callback: () => void): () => void {
+  const mql = getMql();
+
+  if (!mql) {
+    return () => {}; // NOOP for server-side
+  }
+
+  mql.addEventListener('change', callback);
+  return () => {
+    mql.removeEventListener('change', callback);
+  };
+}
+
+/**
+ * Hook to detect user preference for reduced motion.
+ * * @param serverValue - The value used during SSR/Hydration.
+ * Defaults to 'true' (safety first) or 'false' based on your UI strategy.
+ */
+export function usePrefersReducedMotion(serverValue: boolean = false): boolean {
+  // Snapshot returns the current state of the media query
+  const getSnapshot = (): boolean => {
+    return getMql()?.matches ?? serverValue;
+  };
+
+  // Server snapshot returns the fixed value provided during SSR
+  const getServerSnapshot = (): boolean => {
+    return serverValue;
+  };
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+```
+
+## Advanced Examples
+
+### Framer Motion Integration
+
+This hook is perfect for globally controlling animation variants in libraries like Framer Motion. We can conditionally set the `transition` type to `none` or a simple `opacity` fade when motion is restricted.
+
+```tsx
+import { motion } from 'motion';
+
+function Card({ children }) {
+  const shouldReduceMotion = usePrefersReducedMotion();
+
+  const animationProps = shouldReduceMotion
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 } }
+    : { initial: { x: -100 }, animate: { x: 0 }, transition: { type: 'spring' } };
+
+  return <motion.div {...animationProps}>{children}</motion.div>;
+}
+```
+
+### Video Auto-play Control
+
+Respecting motion preferences isn't just about CSS transitions; it's also about content. We can use this hook to disable background video auto-play for sensitive users.
+
+```tsx
+function BackgroundVideo({ src }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  return (
+    <video
+      src={src}
+      autoPlay={!prefersReducedMotion}
+      muted
+      loop
+      controls={prefersReducedMotion}
+    />
+  );
+}
+```
+
+## Why use this?
+
+### Tear-Free Synchronization
+
+Traditional media query hooks often use `useEffect` and `useState`. This can lead to "tearing"—where different components see different values for the same media query during a single render pass. By using `useSyncExternalStore`, we ensure that every component in the tree stays perfectly synchronized with the browser's state.
+
+### Hydration Consistency
+
+One of the biggest hurdles in SSR is the "hydration mismatch" (e.g., the server thinks the user wants motion, but the client browser says otherwise). This hook uses `getServerSnapshot` to force a consistent value during the initial hydration, preventing the dreaded "text content does not match" error.
+
+<Steps>
+  <Step>
+    <h4>External Store Protocol</h4>
+
+    Instead of managing local state, we treat the browser's `window.matchMedia` as an external database. The `subscribe` function attaches a single event listener that notifies React only when the OS setting actually changes.
+  </Step>
+  <Step>
+    <h4>Safety First</h4>
+
+    The `serverValue` parameter allows you to choose your strategy. While we default to `false`, some high-accessibility projects might set this to `true` (Safety First) to ensure no motion happens until the client confirms it is safe.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="info" title="Testing Preference">
+  You can test this hook in Chrome DevTools by opening the **Rendering** tab and using the "Emulate CSS media feature prefers-reduced-motion" dropdown.
+</Callout>
+
+* **Do** provide a consistent `serverValue` across your application to avoid flickering during page loads.
+* **Don't** use this hook to hide critical content. It should only influence *how* content appears, not *if* it appears.
+* **Warning:** Ensure this hook is only used in Client Components (`'use client'`), as `window.matchMedia` is not available on the server.

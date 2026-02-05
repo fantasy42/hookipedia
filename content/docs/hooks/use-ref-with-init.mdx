@@ -1,0 +1,138 @@
+---
+title: useRefWithInit
+description: A performance-optimized useRef alternative that supports lazy initialization, preventing unnecessary object creation on every re-render.
+---
+
+## Introduction
+
+The `useRefWithInit` hook provides a mechanism for **lazy ref initialization**. In standard React, `useRef(new HeavyObject())` instantiates the object on every render, even though React only assigns it to the ref once. This hook ensures the initialization logic only executes a single time, preserving memory and CPU cycles during frequent re-renders.
+
+## Basic Usage
+
+```tsx
+import { useRefWithInit } from '@/hooks/useRefWithInit';
+
+function HeavyComponent() {
+  // HeavyObject is only instantiated once during the initial mount.
+  const instanceRef = useRefWithInit(() => new HeavyObject());
+
+  return <button onClick={() => instanceRef.current.process()}>Run Task</button>;
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    init: {
+      type: '(arg?: U) => T',
+      description: 'A pure function that returns the initial value for the ref.',
+      required: true,
+    },
+    initArg: {
+      type: 'U',
+      description: 'Optional argument passed to the init function to avoid closure creation.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+`React.RefObject<T>`
+
+A stable React ref object where `.current` is populated by the first call to `init`.
+
+## Hook
+
+```ts title='useRefWithInit.ts'
+'use client';
+import { useRef } from 'react';
+
+const UNINITIALIZED = {};
+
+/**
+ * A React.useRef() that is initialized with a function. Note that it accepts an optional
+ * initialization argument, so the initialization function doesn't need to be an inline closure.
+ *
+ * @usage
+ *   const ref = useRefWithInit(sortColumns, columns)
+ */
+export function useRefWithInit<T>(init: () => T): React.RefObject<T>;
+export function useRefWithInit<T, U>(init: (arg: U) => T, initArg: U): React.RefObject<T>;
+export function useRefWithInit(init: (arg?: unknown) => unknown, initArg?: unknown) {
+  const ref = useRef(UNINITIALIZED as any);
+
+  if (ref.current === UNINITIALIZED) {
+    ref.current = init(initArg);
+  }
+
+  return ref;
+}
+```
+
+## Advanced Examples
+
+### Decoupled Initialization
+
+By utilizing the `initArg` parameter, we can define the initialization logic outside the component. This is a "clean code" win that avoids recreating the arrow function on every render, which is a micro-optimization for high-frequency components.
+
+```tsx
+const createManager = (id: string) => new HeavyManager(id);
+
+function ManagerDashboard({ id }: { id: string }) {
+  // 'id' is passed as a dependency to the initializer
+  const managerRef = useRefWithInit(createManager, id);
+
+  return <div>Instance ID: {managerRef.current.id}</div>;
+}
+```
+
+### Stable State Initializers
+
+While `useState` also supports lazy initialization, it triggers a re-render if the value changes. Use `useRefWithInit` when you need a complex object to persist for the full lifecycle without affecting the UI flow.
+
+```tsx
+function DataCollector() {
+  // Useful for internal buffers or accumulators that don't drive JSX
+  const bufferRef = useRefWithInit(() => new DataBuffer({ size: 1024 }));
+
+  const handleData = (chunk) => bufferRef.current.push(chunk);
+
+  return <div onMouseMove={handleData}>Move to Buffer</div>;
+}
+```
+
+## Why use this?
+
+### Memory Leak Prevention
+
+When you use `useRef(new IntersectionObserver(...))`, the browser allocates memory for a new observer on **every single render**. While React ignores these extra instances, the JavaScript engine still has to create them and the Garbage Collector (GC) has to clean them up. `useRefWithInit` ensures that the `new` keyword is only executed once.
+
+### Semantic Stability
+
+Unlike `useMemo`, which React may discard and re-calculate to free up memory (especially in future versions of React), `useRef` guarantees that its value will persist for the full lifetime of the component. This hook provides a safe, lazy way to populate that stable reference.
+
+<Steps>
+  <Step>
+    <h4>The Sentinel Pattern</h4>
+
+    We use a unique `UNINITIALIZED` object constant to distinguish between a ref that hasn't been set yet and a ref that was intentionally set to `null` or `undefined`.
+  </Step>
+  <Step>
+    <h4>Render-Phase Assignment</h4>
+
+    Since refs are mutable, we manually assign the result of the `init` function to `ref.current` during the first render. This is a common pattern in high-performance libraries (like Framer Motion or React Hook Form).
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Purity Requirement">
+  The `init` function should be **pure** relative to the component's render cycle.
+</Callout>
+
+* **Don't** perform side effects (like `fetch` or `localStorage.setItem`) inside the `init` function. Because this logic runs during the "Render Phase," it may be called multiple times if React encounters a concurrent interruption.
+* **Don't** rely on `ref.current` being available during the first render's JSX return if your initialization logic depends on DOM nodes. DOM nodes are only available after the component mounts in `useEffect`.

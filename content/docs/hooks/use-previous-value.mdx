@@ -128,7 +128,7 @@ This implementation explicitly handles the "first render" case by returning `nul
 ## Error Handling
 
 <Callout type="info" title="Performance Note">
-  Because this hook triggers a re-render when the value changes, it is highly efficient for UI logic but should be used judiciously if the tracked <code>value</code> changes on every single frame (e.g., high-frequency mouse movements).
+  Because this hook triggers a re-render when the value changes, it is highly efficient for UI logic but should be used judiciously if the tracked `value` changes on every single frame (e.g., high-frequency mouse movements).
 </Callout>
 
 * **Do** ensure that the `value` passed is stable (using `useMemo` or `useCallback` if it's an object/function) to prevent infinite render loops.

@@ -118,7 +118,7 @@ The returned function is wrapped in `useCallback` with an empty dependency array
 ## Error Handling
 
 <Callout type="warning" title="Use as a Last Resort">
-  Forcing a re-render is an <b>imperative escape hatch</b>. If you find yourself using this frequently, consider if the data should actually be stored in <code>useState</code> or <code>useReducer</code>.
+  Forcing a re-render is an **imperative escape hatch**. If you find yourself using this frequently, consider if the data should actually be stored in `useState` or `useReducer`.
 </Callout>
 
 * **Don't** use this to bypass the standard data flow. If the data *can* be reactive, it *should* be reactive.

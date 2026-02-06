@@ -1,0 +1,135 @@
+---
+title: usePreviousValue
+description: A React hook that tracks the previous state of a value across renders, leveraging render-phase state updates for synchronization.
+---
+
+## Introduction
+
+The `usePreviousValue` hook allows you to "remember" what a value was during the immediate preceding render. This is essential for scenarios where you need to compare current props or state against their previous versions — such as triggering animations on change, tracking specific data shifts, or calculating deltas—without manually managing extra refs and effects.
+
+## Basic Usage
+
+```tsx
+import { usePreviousValue } from '@/hooks/usePreviousValue';
+
+function ScoreDisplay({ score }) {
+  const prevScore = usePreviousValue(score);
+
+  return (
+    <div>
+      <p>Current: {score}</p>
+      {prevScore !== null && <p>Last Score: {prevScore}</p>}
+    </div>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    value: {
+      type: 'T',
+      description: 'The current value to track.',
+      required: true,
+    },
+  }}
+/>
+
+### Returns
+
+`T | null`
+
+Returns the value from the previous render cycle. Returns `null` on the initial mount.
+
+## Hook
+
+```ts title='usePreviousValue.ts'
+'use client';
+import { useState } from 'react';
+
+/**
+ * Returns a previous value of its argument.
+ *
+ * @param value Current value.
+ * @returns Previous value, or null if there is no previous value.
+ */
+export function usePreviousValue<T>(value: T): T | null {
+  const [state, setState] = useState<{current: T; previous: T | null}>({
+    current: value,
+    previous: null,
+  });
+
+  if (value !== state.current) {
+    setState({current: value, previous: state.current});
+  }
+
+  return state.previous;
+}
+```
+
+## Advanced Examples
+
+### Triggering Transitions
+
+We can use the previous value to determine the direction of a slide animation. By comparing the previous index with the current one, we know whether the user moved "Next" or "Back."
+
+```tsx
+function Carousel({ activeIndex }) {
+  const prevIndex = usePreviousValue(activeIndex);
+
+  const direction = activeIndex > (prevIndex ?? 0) ? 'right' : 'left';
+
+  return <div className={`slide slide-${direction}`}>Item {activeIndex}</div>;
+}
+```
+
+### Conditional Effect Logging
+
+Sometimes you only want to perform an action if a specific part of an object changed. `usePreviousValue` allows for precise comparison logic.
+
+```tsx
+function UserProfile({ data }) {
+  const prevData = usePreviousValue(data);
+
+  if (prevData && prevData.id !== data.id) {
+    console.log(`User switched from ${prevData.name} to ${data.name}`);
+  }
+
+  return <div>{data.name}</div>;
+}
+```
+
+### Render-Phase Synchronization
+
+Most "previous value" hooks use `useEffect` and `useRef`. However, `useEffect` runs **after** the render is committed to the screen. If you use a ref-based previous value to drive UI logic, you might find your UI is one render "behind" or requires a second render to catch up.
+
+By using **Render-Phase State Updates** (calling `setState` during the render body), we update the internal state immediately. React will recognize the state change, bail out of the current render, and restart it with the updated state before the user ever sees the "incorrect" frame.
+
+### Type Safety and Null Handling
+
+This implementation explicitly handles the "first render" case by returning `null`. This forces developers to handle the initial state gracefully, preventing `undefined` errors when trying to compare against a value that doesn't exist yet.
+
+<Steps>
+  <Step>
+    <h4>State Mirroring</h4>
+
+    We store both the `current` and `previous` values in a single state object. This ensures that the relationship between the two is atomic and never gets out of sync.
+  </Step>
+  <Step>
+    <h4>The "Bailout" Pattern</h4>
+
+    When `value !== state.current`, we trigger a state update. In React, updating state during render (for the same component) is a supported pattern for tracking props that change, providing a more predictable flow than `useEffect`.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="info" title="Performance Note">
+  Because this hook triggers a re-render when the value changes, it is highly efficient for UI logic but should be used judiciously if the tracked <code>value</code> changes on every single frame (e.g., high-frequency mouse movements).
+</Callout>
+
+* **Do** ensure that the `value` passed is stable (using `useMemo` or `useCallback` if it's an object/function) to prevent infinite render loops.
+* **Don't** use this hook to store values that don't affect the rendered output; for non-visual tracking, a standard `useRef` is more performant as it avoids the re-render cycle.

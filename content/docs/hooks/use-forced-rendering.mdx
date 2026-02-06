@@ -1,0 +1,126 @@
+---
+title: useForcedRerendering
+description: A utility hook that returns a stable function to manually trigger a component re-render, useful for synchronizing with non-reactive external state.
+---
+
+## Introduction
+
+While React is designed to be declarative, we occasionally encounter "black-box" scenarios where internal logic or external data sources change without notifying React's state system. The `useForcedRerendering` hook provides a "manual override" to force the component to re-evaluate its UI, ensuring it stays in sync with non-reactive variables or mutable objects.
+
+## Basic Usage
+
+```tsx
+import { useForcedRerendering } from '@/hooks/useForcedRerendering';
+
+function ManualSyncComponent() {
+  const forceUpdate = useForcedRerendering();
+
+  const handleExternalChange = () => {
+    // ... some logic happens outside of React state
+    forceUpdate();
+  };
+
+  return <button onClick={handleExternalChange}>Force UI Refresh</button>;
+}
+```
+
+## API Reference
+
+### Returns
+
+`() => void`
+
+A stable, memoized function that, when called, triggers a state update and forces the component to re-render.
+
+
+## Hook
+
+```ts title='useForcedRerendering.ts'
+'use client';
+import { useState, useCallback } from 'react';
+
+/**
+ * Returns a function that forces a rerender.
+ */
+export function useForcedRerendering() {
+  const [, setState] = useState({});
+
+  return useCallback(() => {
+    setState({});
+  }, []);
+}
+```
+
+## Advanced Examples
+
+### Synchronizing with Mutable Classes
+
+When working with third-party libraries (like game engines or legacy data stores) that use mutable instances, you can use this hook to refresh the UI after the internal state of the instance has been modified.
+
+```tsx
+function Dashboard({ engine }) {
+  const forceUpdate = useForcedRerendering();
+
+  useEffect(() => {
+    // Listen to a non-React event emitter
+    engine.on('change', forceUpdate);
+    return () => engine.off('change', forceUpdate);
+  }, [engine, forceUpdate]);
+
+  return <div>Power Level: {engine.getPower()}</div>;
+}
+```
+
+### Cohesion with Mutable Refs
+
+When using `useRef` to hold values that change but shouldn't always trigger a render (like a high-frequency counter), you can use this hook to "flush" those changes to the UI only when necessary.
+
+```tsx
+function BufferedDisplay() {
+  const countRef = useRef(0);
+  const forceUpdate = useForcedRerendering();
+
+  const increment = () => {
+    countRef.current++;
+    // We only update the UI when we decide it's necessary
+    if (countRef.current % 5 === 0) {
+      forceUpdate();
+    }
+  };
+
+  return <button onClick={increment}>Rendered Count: {countRef.current}</button>;
+}
+```
+
+## Why use this?
+
+### The Object Identity Trick
+
+React's `useState` bail-out logic prevents a re-render if the new state is strictly equal (`===`) to the previous state. By passing an empty object literal `{}` to the setter, we guarantee a new reference identity every time the function is called. Because `{}` never equals the previous `{}`, React is forced to schedule an update.
+
+### Performance via Stability
+
+The returned function is wrapped in `useCallback` with an empty dependency array. This ensures the function identity is **stable**. You can safely pass `forceUpdate` to child components as a prop or include it in `useEffect` dependency arrays without fear of triggering unnecessary effect re-runs.
+
+<Steps>
+  <Step>
+    <h4>State Allocation</h4>
+
+    We use an empty object as the state value. It’s lightweight and serves only as a "dirty" flag for React’s reconciliation engine.
+  </Step>
+  <Step>
+    <h4>The Update Cycle</h4>
+
+    Calling the returned function triggers a state transition. React marks the component as "needing update," performs its diffing process, and reflects any changes in the DOM.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Use as a Last Resort">
+  Forcing a re-render is an <b>imperative escape hatch</b>. If you find yourself using this frequently, consider if the data should actually be stored in <code>useState</code> or <code>useReducer</code>.
+</Callout>
+
+* **Don't** use this to bypass the standard data flow. If the data *can* be reactive, it *should* be reactive.
+* **Do** be careful of infinite loops. If calling the forced re-render triggers an effect that calls the forced re-render again, your application will crash.
+* **Do** use this in conjunction with `useRef` for values that change very rapidly (like high-frequency socket data) where you only want to update the UI at specific throttled intervals.

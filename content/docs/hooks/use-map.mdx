@@ -1,0 +1,236 @@
+---
+title: useMap
+description: A powerful, reactive wrapper for the JavaScript Map object. It manages internal state transitions to ensure your UI updates seamlessly when entries change.
+---
+
+## Introduction
+
+While the native JavaScript `Map` is excellent for structured data storage, it isn't inherently reactive in React. Updating a standard Map doesn't trigger a re-render because React relies on immutable state updates.
+
+The `useMap` hook bridges this gap. It provides a familiar Map-like API that handles immutability under the hood, ensuring that whenever you `set`, `delete`, or `clear` entries, your components update correctly and efficiently.
+
+## Basic Usage
+
+```tsx
+import { useMap } from '@/hooks/useMap';
+
+function TaskList() {
+  const tasks = useMap<number, string>([
+    [1, 'Learn React 19'],
+    [2, 'Master Server Components']
+  ]);
+
+  return (
+    <div>
+      <h3>Active Tasks: {tasks.size}</h3>
+
+      <button onClick={() => tasks.set(Date.now(), 'New Task')}>
+        Add Task
+      </button>
+
+      <button onClick={() => tasks.clear()}>Remove All</button>
+
+      <ul>
+        {tasks.map(([id, title]) => (
+          <li key={id}>
+            {title}
+            <button onClick={() => tasks.delete(id)}>Done</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    initialEntries: {
+      type: 'readonly (readonly [K, V])[] | null',
+      description: 'An optional array of key-value pairs to initialize the Map.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+The hook returns a `ReactiveMap<K, V>` object:
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `raw` | `Map<K, V>` | The underlying native Map instance. |
+| `size` | `number` | The number of elements in the map. |
+| `get` | `(key: K) => V \| undefined` | Retrieves the value associated with the key. |
+| `has` | `(key: K) => boolean` | Checks if a key exists in the map. |
+| `set` | `(key, value \| updater) => void` | Sets a value or uses a functional updater. |
+| `delete`| `(key: K) => void` | Removes an item by key. |
+| `clear` | `() => void` | Removes all items from the map. |
+| `map` | `(callback) => U[]` | A convenience method to iterate and transform entries. |
+
+## Hook
+
+```ts title='useMap.ts'
+import { useCallback, useMemo, useState } from 'react';
+
+/**
+ * A custom hook that manages a reactive JavaScript Map state.
+ *
+ * @template K The type of keys in the map.
+ * @template V The type of values in the map.
+ * @param initialEntries - An optional array of [key, value] pairs to initialize the map.
+ * @returns An object containing the reactive Map and methods to manipulate it.
+ */
+export function useMap<K = unknown, V = unknown>(
+  initialEntries?: readonly (readonly [K, V])[] | null
+): ReactiveMap<K, V> {
+  const [map, setMap] = useState<Map<K, V>>(() => new Map(initialEntries));
+
+  const clear = useCallback<ReactiveMap<K, V>['clear']>(() => {
+    setMap((prev) => {
+      return prev.size === 0 ? prev : new Map();
+    });
+  }, []);
+
+  const deleteItem = useCallback<ReactiveMap<K, V>['delete']>((key) => {
+    setMap((prev) => {
+      if (!prev.has(key)) {
+        return prev;
+      }
+
+      const copy = new Map(prev);
+      copy.delete(key);
+      return copy;
+    });
+  }, []);
+
+  const get = useCallback<ReactiveMap<K, V>['get']>(
+    (key) => map.get(key),
+    [map]
+  );
+
+  const has = useCallback<ReactiveMap<K, V>['has']>(
+    (key) => map.has(key),
+    [map]
+  );
+
+  const setItem = useCallback<ReactiveMap<K, V>['set']>((key, action) => {
+    setMap((prev) => {
+      const current = prev.get(key);
+      const next = isFunction(action) ? action(current, prev) : action;
+
+      if (current === next) {
+        return prev;
+      }
+
+      return new Map(prev).set(key, next);
+    });
+  }, []);
+
+  const mapItem = useCallback<ReactiveMap<K, V>['map']>(
+    (callbackFn) => {
+      return Array.from(map.entries(), (entry, index) =>
+        callbackFn(entry, index, map)
+      );
+    },
+    [map]
+  );
+
+  return useMemo(() => {
+    return {
+      raw: map,
+      clear,
+      delete: deleteItem,
+      get,
+      has,
+      set: setItem,
+      size: map.size,
+      map: mapItem,
+    };
+  }, [map, clear, deleteItem, get, has, setItem, mapItem]);
+}
+
+export interface ReactiveMap<K, V> {
+  /** The internal Map instance (Read-only). */
+  raw: Map<K, V>;
+  /** Removes all entries. */
+  clear(): void;
+  /** Removes a specific entry. */
+  delete(key: K): void;
+  /** Gets an entry value. */
+  get(key: K): V | undefined;
+  /** Checks for an entry. */
+  has(key: K): boolean;
+  /** Sets an entry or updates it. */
+  set(key: K, action: V | ((prev: V | undefined, state: Map<K, V>) => V)): void;
+  /** Iterates over entries and returns an array. */
+  map<U>(callbackFn: (entry: [K, V], index: number, map: Map<K, V>) => U): U[];
+  /** Current count of entries. */
+  readonly size: number;
+}
+
+// A safer type definition for the function check
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyFunction = (...args: any[]) => any;
+
+const isFunction = <T extends AnyFunction>(val: unknown): val is T =>
+  typeof val === 'function';
+```
+
+## Advanced Examples
+
+### Real-time Search Indexing
+
+`useMap` is excellent for storing indexed data from an API, allowing for instant lookups without filtering large arrays on every render.
+
+```tsx
+const productCache = useMap<string, Product>();
+
+// After fetching data
+const onDataLoad = (products: Product[]) => {
+  products.forEach(p => productCache.set(p.sku, p));
+};
+
+// Instant lookup O(1)
+const getProduct = (sku: string) => productCache.get(sku);
+```
+
+### Functional Updates for Counters
+
+The `set` method supports functional updates, similar to `useState`, which is useful when the new value depends on the previous one.
+
+```tsx
+const stock = useMap<string, number>();
+
+const incrementStock = (sku: string) => {
+  // Access prevValue directly in the setter
+  stock.set(sku, (prev = 0) => prev + 1);
+};
+```
+
+## Why use this?
+
+### Smart Bail-out Logic
+
+In React, re-rendering is expensive. A naive Map hook might create a new Map on every call, even if you try to `delete` a key that isn't there.
+
+<Callout type="info" title="Performance Optimization">
+  We've baked in **equality checks**. In `deleteItem` and `setItem`, the hook checks if the operation would actually change the state. If you `set` a value to what it already is, or `delete` a non-existent key, the hook returns the `prev` state reference. This prevents a re-render cycle before it even starts.
+</Callout>
+
+### Native API Parity
+
+We designed this to feel like the native JavaScript `Map` while adhering to React's **immutability requirements**. Instead of learning a new set of naming conventions, you get the familiarity of `.get()`, `.has()`, and `.set()`, but with the safety of a reactive hook.
+
+## Error Handling
+
+<Callout type="warning" title="Map Mutation">
+  Never mutate the `raw` property directly. Doing so (e.g., `map.raw.set('x', 'y')`) will update the data in memory but **will not** trigger a React re-render, leading to a de-synced UI. Always use the provided `set`, `delete`, and `clear` methods.
+</Callout>
+
+- **SSR Safety**: This hook is perfectly safe for SSR as it initializes state during the construction phase.
+- **Type Safety**: When using TypeScript, always provide generic types (e.g., `useMap<string, number>()`) to ensure your updaters and getters are type-checked.

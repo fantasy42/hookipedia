@@ -1,0 +1,238 @@
+---
+title: useSet
+description: A reactive wrapper for the JavaScript Set object. It provides an immutable API for managing unique collections while ensuring optimal re-renders.
+---
+
+## Introduction
+
+The `useSet` hook is designed to manage collections of unique values. While standard JavaScript `Set` objects are excellent for ensuring data uniqueness, they lack reactivity in React.
+
+This hook provides a familiar interface to work with sets—offering `add`, `delete`, and `has` methods — while handling the underlying immutability required to trigger React updates. It is particularly useful for managing selection states, toggles, or any collection where duplicates are not allowed.
+
+## Basic Usage
+
+The simplest way to use `useSet` is to manage a collection of unique identifiers, such as a "favorites" list or a selection of IDs.
+
+```tsx
+import { useSet } from '@/hooks/useSet';
+
+function FavoriteTags() {
+  const tags = useSet<string>(['React', 'TypeScript']);
+
+  return (
+    <div>
+      <h3>Unique Tags ({tags.size})</h3>
+
+      <button onClick={() => tags.add('Next.js')}>Add Next.js</button>
+      <button onClick={() => tags.clear()}>Clear All</button>
+
+      <ul>
+        {tags.map((tag) => (
+          <li key={tag}>
+            {tag}
+            <button onClick={() => tags.delete(tag)}>Remove</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    initialValues: {
+      type: 'readonly T[] | null',
+      description: 'An optional array of values to initialize the Set.',
+      required: false,
+    },
+  }}
+/>
+
+### Returns
+
+The hook returns a `ReactiveSet<T>` object:
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `raw` | `Set<T>` | The underlying native Set instance. |
+| `size` | `number` | The number of elements in the set. |
+| `has` | `(value: T) => boolean` | Checks if a value exists in the set. |
+| `add` | `(value \| updater) => void` | Adds a value or uses a functional updater. |
+| `delete`| `(value: T) => void` | Removes a specific value. |
+| `clear` | `() => void` | Removes all values from the set. |
+| `map` | `(callback) => U[]` | A convenience method to iterate and transform values. |
+
+## Hook
+```ts title='useSet.ts'
+import { useCallback, useMemo, useState } from 'react';
+
+/**
+ * A custom hook that manages a reactive JavaScript Set.
+ *
+ * @template T - The type of values held in the set.
+ * @param initialValues - Optional initial values to populate the set.
+ * @returns An object containing the reactive set and its manipulation methods.
+ */
+export function useSet<T = unknown>(
+  initialValues?: readonly T[] | null
+): ReactiveSet<T> {
+  const [set, setSet] = useState<Set<T>>(() => new Set(initialValues));
+
+  const add = useCallback<ReactiveSet<T>['add']>((action) => {
+    setSet((prev) => {
+      const value = isFunction(action) ? action(prev) : action;
+
+      if (prev.has(value)) {
+        return prev;
+      }
+
+      const copy = new Set(prev);
+      copy.add(value);
+      return copy;
+    });
+  }, []);
+
+  const clear = useCallback<ReactiveSet<T>['clear']>(() => {
+    setSet((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
+
+  const deleteItem = useCallback<ReactiveSet<T>['delete']>((value) => {
+    setSet((prev) => {
+      if (!prev.has(value)) {
+        return prev;
+      }
+
+      const copy = new Set(prev);
+      copy.delete(value);
+      return copy;
+    });
+  }, []);
+
+  const has = useCallback<ReactiveSet<T>['has']>(
+    (value) => set.has(value),
+    [set]
+  );
+
+  const mapItem = useCallback<ReactiveSet<T>['map']>(
+    (callbackFn) => {
+      return Array.from(set, (value, index) => callbackFn(value, index, set));
+    },
+    [set]
+  );
+
+  return useMemo(() => {
+    return {
+      raw: set,
+      add,
+      clear,
+      delete: deleteItem,
+      has,
+      map: mapItem,
+      size: set.size,
+    };
+  }, [set, add, clear, deleteItem, has, mapItem]);
+}
+
+export interface ReactiveSet<T> {
+  /** The internal Set instance (Read-only). */
+  raw: Set<T>;
+  /** Adds a value to the set. */
+  add(action: T | ((prevState: Set<T>) => T)): void;
+  /** Removes all values from the set. */
+  clear(): void;
+  /** Removes a specific value. */
+  delete(value: T): void;
+  /** Returns true if the value exists in the set. */
+  has(value: T): boolean;
+  /** Iterates over values and returns an array. */
+  map<U>(callbackFn: (value: T, index: number, set: Set<T>) => U): U[];
+  /** The current count of unique elements. */
+  readonly size: number;
+}
+
+// A safer type definition for the function check
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyFunction = (...args: any[]) => any;
+
+const isFunction = <T extends AnyFunction>(val: unknown): val is T =>
+  typeof val === 'function';
+```
+
+## Advanced Examples
+
+### Bulk Selection Management
+
+In data tables or file explorers, we often need to select multiple items. Using a `Set` ensures that even if a user double-clicks or an event fires twice, we never have duplicate IDs in our state.
+
+```tsx
+const selectedIds = useSet<string>();
+
+const toggleAll = (ids: string[]) => {
+  if (selectedIds.size === ids.length) {
+    selectedIds.clear();
+  } else {
+    ids.forEach(id => selectedIds.add(id));
+  }
+};
+
+const handleExport = () => {
+  // Accessing the raw set for high-speed processing
+  const exportPayload = Array.from(selectedIds.raw);
+  api.exportItems(exportPayload);
+};
+```
+
+### Real-time Tag Filtering
+
+`useSet` is the ideal choice for faceted search. It provides O(1) lookups to check if a filter is active, making the UI feel incredibly snappy even with hundreds of filter chips.
+
+```tsx
+const activeFilters = useSet<string>();
+
+const products = allProducts.filter(p =>
+  activeFilters.size === 0 || activeFilters.has(p.category)
+);
+
+return (
+  <div className="flex gap-2">
+    {categories.map(cat => (
+      <Chip
+        key={cat}
+        active={activeFilters.has(cat)}
+        onClick={() => activeFilters.has(cat)
+          ? activeFilters.delete(cat)
+          : activeFilters.add(cat)
+        }
+      />
+    ))}
+  </div>
+);
+```
+
+## Why use this?
+
+### Structural Sharing & Optimization
+
+Like its sibling `useMap`, this hook implements strict **bail-out checks**. If you try to `add` a value that is already in the Set, or `delete` one that isn't, the hook will not trigger a re-render.
+
+<Callout type="info" title="Performance">
+  Standard React patterns often involve `[...prev, newValue]`, which doesn't check for duplicates. By using a native `Set` internally, we get built-in uniqueness and high-performance lookups, while our hook ensures the reference only changes when the content actually does.
+</Callout>
+
+### Iteration Convenience
+
+Since the native `Set` does not have a `.map()` method (it only has `.forEach()`), we've included a `.map()` helper that converts the set to an array internally. This allows you to render your collection directly in JSX without boilerplate conversions.
+
+## Error Handling
+
+<Callout type="error" title="Reference Safety">
+  Avoid adding complex objects to the Set unless they maintain the same reference. JavaScript Sets compare objects by **reference**, not by value. If you add `{ id: 1 }` twice, the Set will contain two separate entries because they are different objects in memory.
+</Callout>
+
+- **SSR Safety**: The `useState` initializer is lazy, ensuring the `Set` is created only when the component mounts on the client or during the initial render.
+- **Direct Mutation**: Never call `set.raw.add()`. Always use `set.add()` to ensure React is notified of the change.

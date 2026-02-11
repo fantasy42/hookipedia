@@ -1,0 +1,396 @@
+---
+title: useStateWithHistory
+description: A powerful React state hook that tracks value changes over time, providing built-in undo, redo, and history-limiting capabilities for complex UI workflows.
+---
+
+## Introduction
+
+The `useStateWithHistory` hook is an enhanced version of the standard `useState` hook. It solves the complexity of managing state transitions by maintaining a linear history of values. This is particularly valuable for applications like text editors, form builders, or data dashboards where users expect a robust "Undo/Redo" functionality without the developer having to manually track previous states or implement complex state-machine logic.
+
+## Basic Usage
+
+```tsx
+import { useStateWithHistory } from '@/hooks/useStateWithHistory';
+
+function Counter() {
+  const [count, setCount, undo, redo] = useStateWithHistory(0);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(count + 1)}>Increment</button>
+      <button onClick={undo}>Undo</button>
+      <button onClick={redo}>Redo</button>
+    </div>
+  );
+}
+```
+
+## API Reference
+
+### Parameters
+
+<TypeTable
+  type={{
+    initialValue: {
+      type: 'T | (() => T)',
+      description: 'The initial state or a lazy initializer function.',
+      required: true,
+    },
+    opts: {
+      type: 'UseStateWithHistoryOptions',
+      description: 'Configuration object to control history behavior.',
+      required: false,
+    },
+  }}
+/>
+
+### Configuration (opts)
+
+<TypeTable
+  type={{
+    limit: {
+      type: 'number',
+      description: 'Max number of history entries. -1 for unlimited.',
+      default: '-1',
+    },
+  }}
+/>
+
+### Returns
+
+A tuple: `[value, setValue, undo, redo, meta]`
+
+| Name | Type | Description |
+| :--- | :--- | :--- |
+| `value` | `T` | The current active state. |
+| `setValue` | `(val) => void` | Updates the state and pushes a new entry to history. |
+| `undo` | `() => void` | Moves the pointer back to the previous state. |
+| `redo` | `() => void` | Moves the pointer forward to the next state. |
+| `meta` | `object` | Contains `canUndo`, `canRedo`, and the full `history` array. |
+
+## Hook
+
+```ts title='useStateWithHistory.ts'
+import { useCallback, useReducer } from 'react';
+
+/**
+ * A hook that mimics `useState` but maintains a history of values, allowing
+ * the user to `undo` and `redo` state changes.
+ *
+ * @template ValueType - The type of the state value.
+ * @param initialValue - The initial state or a lazy initializer function.
+ * @param opts - Configuration options (e.g., history limit).
+ * @returns A tuple containing: `[value, setValue, undo, redo, meta]`.
+ *
+ * @example
+ * ```tsx
+ * const [count, setCount, undo, redo, { canUndo, canRedo }] = useStateWithHistory(0, { limit: 10 });
+ * ```
+ */
+export function useStateWithHistory<ValueType>(
+  initialValue: ValueType | (() => ValueType),
+  opts: UseStateWithHistoryOptions = {}
+): HistoryState<ValueType> {
+  const {limit = -1} = opts;
+
+  const [state, dispatch] = useReducer(
+    historyReducer<ValueType>, // Pass function reference directly
+    initialValue,
+    (initVal) => {
+      const value = resolveInitialValue(initVal);
+      return {
+        history: [value],
+        currentIndex: 0,
+      };
+    }
+  );
+
+  const undo = useCallback(() => {
+    dispatch({type: ActionType.UNDO});
+  }, []);
+
+  const redo = useCallback(() => {
+    dispatch({type: ActionType.REDO});
+  }, []);
+
+  const setValue = useCallback(
+    (newValue: ValueType | ((oldValue: ValueType) => ValueType)) => {
+      dispatch({type: ActionType.SET, next: newValue, limit});
+    },
+    [limit] // Dispatch is stable, strictly only 'limit' changes behavior here
+  );
+
+  const canUndo = state.currentIndex > 0;
+  const canRedo = state.currentIndex < state.history.length - 1;
+
+  return [
+    state.history[state.currentIndex],
+    setValue,
+    undo,
+    redo,
+    {
+      canUndo,
+      canRedo,
+      history: state.history,
+    },
+  ];
+}
+
+function historyReducer<ValueType>(
+  state: State<ValueType>,
+  action: Action<ValueType>
+): State<ValueType> {
+  const {history, currentIndex} = state;
+
+  switch (action.type) {
+    case ActionType.SET: {
+      const {next, limit} = action;
+      const currentValue = history[currentIndex];
+
+      const newValue = isFunctionalUpdate(next) ? next(currentValue) : next;
+
+      if (Object.is(newValue, currentValue)) {
+        return state;
+      }
+
+      const historyHeader = history.slice(0, currentIndex + 1);
+
+      const nextHistory = [...historyHeader, newValue];
+
+      if (limit > 0 && nextHistory.length > limit) {
+        const slicedHistory = nextHistory.slice(-limit);
+        return {
+          history: slicedHistory,
+          currentIndex: slicedHistory.length - 1,
+        };
+      }
+
+      return {
+        history: nextHistory,
+        currentIndex: nextHistory.length - 1,
+      };
+    }
+
+    case ActionType.UNDO: {
+      return {
+        history,
+        currentIndex: Math.max(0, currentIndex - 1),
+      };
+    }
+
+    case ActionType.REDO: {
+      return {
+        history,
+        currentIndex: Math.min(history.length - 1, currentIndex + 1),
+      };
+    }
+
+    default: {
+      return state;
+    }
+  }
+}
+
+function isFunctionalUpdate<T>(
+  value: T | ((prev: T) => T)
+): value is (prev: T) => T {
+  return typeof value === 'function';
+}
+
+function resolveInitialValue<T>(initialValue: T | (() => T)): T {
+  return isFunctionalUpdate(initialValue)
+    ? (initialValue as () => T)()
+    : initialValue;
+}
+
+const ActionType = {
+  SET: 'SET',
+  UNDO: 'UNDO',
+  REDO: 'REDO',
+} as const;
+
+/**
+ * The return tuple of the `useStateWithHistory` hook.
+ */
+export type HistoryState<ValueType> = [
+  state: ValueType,
+  setter: (next: ValueType | ((prev: ValueType) => ValueType)) => void,
+  undo: () => void,
+  redo: () => void,
+  meta: {
+    canUndo: boolean;
+    canRedo: boolean;
+    /** The complete history array (use with caution on large datasets). */
+    history: ValueType[];
+  },
+];
+
+export interface UseStateWithHistoryOptions {
+  /**
+   * The maximum number of history entries to keep.
+   * Defaults to -1 (no limit).
+   */
+  limit?: number;
+}
+
+interface State<ValueType> {
+  /** The chronological list of state values. */
+  history: ValueType[];
+  /** The pointer to the current value in the history array. */
+  currentIndex: number;
+}
+
+type Action<ValueType> =
+  | {
+      type: typeof ActionType.SET;
+      next: ValueType | ((val: ValueType) => ValueType);
+      limit: number;
+    }
+  | {type: typeof ActionType.UNDO}
+  | {type: typeof ActionType.REDO};
+```
+
+## Advanced Examples
+
+### Canvas Drawing Tool
+
+In a creative application, you might want to limit history to save memory while allowing users to revert mistakes. This example uses the `limit` option to keep only the last 50 actions.
+
+```tsx
+import { useCallback } from 'react';
+import { useStateWithHistory } from '@/hooks/useStateWithHistory';
+
+function DrawingBoard() {
+  const [lines, setLines, undo, redo, { canUndo, canRedo }] = useStateWithHistory([], { limit: 50 });
+
+  // Memoizing the handler ensures that the Canvas component (if memoized)
+  // doesn't re-render unless the lines state actually changes.
+  const handleDrawEnd = useCallback((newLine) => {
+    setLines((prev) => [...prev, newLine]);
+  }, [setLines]);
+
+  return (
+    <div className="workspace">
+      <Toolbar
+        onUndo={undo}
+        undoDisabled={!canUndo}
+        onRedo={redo}
+        redoDisabled={!canRedo}
+      />
+      <Canvas lines={lines} onDrawEnd={handleDrawEnd} />
+    </div>
+  );
+}
+```
+
+### Multi-Step Wizard with Reversion
+
+In complex forms or setup wizards, users often want to step back to a previous configuration without losing the "future" path they already configured. We set a `limit: 10` here to ensure we only keep the last 10 configuration changes in memory.
+
+```tsx
+import { useCallback } from 'react';
+import { useStateWithHistory } from '@/hooks/useStateWithHistory';
+
+function SetupWizard() {
+  const [config, setConfig, undo, redo, { canUndo, canRedo }] = useStateWithHistory({
+    theme: 'light',
+    notifications: 'enabled',
+    layout: 'grid',
+    density: 'comfortable'
+  }, { limit: 10 });
+
+  const updateConfig = useCallback((key: string, value: string) => {
+    setConfig(prev => ({ ...prev, [key]: value }));
+  }, [setConfig]);
+
+  return (
+    <div className="space-y-4 p-6 border rounded-lg">
+      <div className="grid grid-cols-2 gap-4">
+        <label>
+          Theme
+          <select value={config.theme} onChange={(e) => updateConfig('theme', e.target.value)}>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="system">System</option>
+          </select>
+        </label>
+
+        <label>
+          Notifications
+          <select value={config.notifications} onChange={(e) => updateConfig('notifications', e.target.value)}>
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+            <option value="mentions">Mentions Only</option>
+          </select>
+        </label>
+
+        <label>
+          Layout
+          <select value={config.layout} onChange={(e) => updateConfig('layout', e.target.value)}>
+            <option value="grid">Grid</option>
+            <option value="list">List</option>
+            <option value="compact">Compact</option>
+          </select>
+        </label>
+
+        <label>
+          Density
+          <select value={config.density} onChange={(e) => updateConfig('density', e.target.value)}>
+            <option value="comfortable">Comfortable</option>
+            <option value="compact">Compact</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="flex gap-2 pt-4 border-t">
+        <button onClick={undo} disabled={!canUndo} className="px-4 py-2 bg-gray-100 disabled:opacity-50">
+          Undo Change
+        </button>
+        <button onClick={redo} disabled={!canRedo} className="px-4 py-2 bg-gray-100 disabled:opacity-50">
+          Redo Change
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+## Why use this?
+
+### The "Branching" Logic
+
+When you `undo` and then call `setValue`, the hook performs a **history branch**. Instead of appending to the current list, it truncates the "future" entries ahead of your current point and starts a new timeline. This correctly mirrors how "Undo" works in professional software (like VS Code or Photoshop), where a new action after an undo clears the redo path.
+
+### Performance & Memory Control
+
+<Callout type="idea" title="Internal Efficiency">
+  We use `useReducer` instead of `useState` because history management involves complex transitions where the current index and the history array must be updated in tandem.
+</Callout>
+
+<Steps>
+  <Step>
+    <h4>Atomic State Updates</h4>
+
+    By using `useReducer`, we ensure that `history` and `currentIndex` are updated in a single operation. This prevents the index from pointing to a non-existent entry during rapid updates.
+  </Step>
+  <Step>
+    <h4>Bailing Out on No-Op</h4>
+
+    The reducer performs an `Object.is` check before committing. If the new state is identical to the current one, the update is ignored. This keeps the history stack clean and prevents redundant entries.
+  </Step>
+  <Step>
+    <h4>Efficient History Capping</h4>
+
+    When a `limit` is set, we use `slice(-limit)` to truncate the array. This keeps memory usage predictable and prevents the application from slowing down during long-running user sessions.
+  </Step>
+</Steps>
+
+## Error Handling
+
+<Callout type="warning" title="Memory Warning">
+  If you are storing large objects (like high-res images or massive data arrays) in state without a `limit`, you may encounter performance degradation. Always set a sensible `limit` for memory-intensive states.
+</Callout>
+
+* **Reference Types**: Because this hook keeps previous states in an array, ensure your state is immutable. If you mutate a property inside an object in the history, all history entries pointing to that object will reflect the change. Always use **spread operators** or **immutability libraries**.
+* **SSR Safety**: This hook is SSR-safe as it relies on standard React state hooks. However, since history is client-side by nature, your `initialValue` should be consistent between server and client to avoid hydration mismatches.
